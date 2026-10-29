@@ -34,16 +34,24 @@
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   [hidden] { display: none !important; }
+  /* Marco de app: solo se desplaza el contenido; la barra de pestañas forma parte del marco y no se mueve. */
+  html, body { height: 100%; }
   body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
     font: 16px/1.35 'Space Grotesk', -apple-system, system-ui, sans-serif;
     -webkit-text-size-adjust: 100%;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
   }
   button, input, select { font: inherit; color: inherit; }
   button { cursor: pointer; }
-  main { max-width: 560px; margin: 0 auto; padding: calc(16px + env(safe-area-inset-top)) 16px calc(96px + env(safe-area-inset-bottom)); }
+  .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+  main { max-width: 560px; margin: 0 auto; padding: calc(16px + env(safe-area-inset-top)) 16px 24px; }
 
   /* Cabecera */
   .cab { display: flex; align-items: center; gap: 8px; padding: 4px 4px 14px; }
@@ -156,8 +164,7 @@
 
   /* Pestañas */
   .tabs {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
-    background: rgba(12,12,13,.92); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    flex: 0 0 auto; z-index: 10; background: var(--bg);
     border-top: 1px solid var(--line); padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
   }
   .tabs div { max-width: 560px; margin: 0 auto; display: flex; }
@@ -222,6 +229,7 @@
   <div class="frase" id="frase">Contando monedas…</div>
 </div>
 <div class="carga" id="carga"></div>
+<div class="scroll" id="scroll">
 <main>
   <header class="cab">
     <button class="redondo" id="atras" aria-label="Volver" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
@@ -233,6 +241,7 @@
   </header>
   <div id="vista"><div class="cargando">Cargando…</div></div>
 </main>
+</div>
 
 <nav class="tabs" aria-label="Apartados"><div id="tabs"></div></nav>
 
@@ -453,9 +462,15 @@
     else if (conMes) $('titulo').innerHTML = esc(SUB[vista] || 'Movimientos') + `<small>${esc(mesCorto(mes) + anio)}</small>`;
     else $('titulo').textContent = SUB[vista] || TABS.find(t => t[0] === vista)[1];
 
+    // La barra se dibuja una sola vez; al cambiar de pestaña solo cambia cuál está encendida.
     const tabActiva = esSub ? 'mas' : vista;
-    $('tabs').innerHTML = TABS.map(([id, txt]) =>
-      `<button type="button" data-tab="${id}" ${id === tabActiva ? 'aria-current="page"' : ''}>${ico(id, 22)}<span>${txt}</span></button>`).join('');
+    if (!$('tabs').children.length) {
+      $('tabs').innerHTML = TABS.map(([id, txt]) => `<button type="button" data-tab="${id}">${ico(id, 22)}<span>${txt}</span></button>`).join('');
+    }
+    $('tabs').querySelectorAll('[data-tab]').forEach(b => {
+      if (b.dataset.tab === tabActiva) b.setAttribute('aria-current', 'page');
+      else b.removeAttribute('aria-current');
+    });
 
     $('vista').innerHTML = VISTAS[vista]();
     if (vista === 'inicio') prepararFormMov($('rapido'));
@@ -858,7 +873,7 @@
     vista = v;
     try { localStorage.setItem('gastos.vista', v); } catch (e) {}
     pintar();
-    window.scrollTo(0, 0);
+    $('scroll').scrollTop = 0;
   }
 
   $('atras').onclick = () => ir('mas');
