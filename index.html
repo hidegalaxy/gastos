@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gastos</title>
+<!-- Para la web propia: icono y pantalla completa al añadirla a la pantalla de inicio. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Gastos">
+<meta name="theme-color" content="#0c0c0d">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icono-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0c0c0d;
+    --card: #161618;
+    --line: #232327;
+    --line2: #2f2f34;
+    --track: #26262a;
+    --text: #f4f4f2;
+    --text2: #d6d6d2;
+    --muted: #9a9aa1;
+    --dim: #6c6c73;
+    --accent: #c8f169;
+    --ink: #0c0c0d;
+    --warn: #ffc247;
+    --bad: #ff6b5e;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.35 'Space Grotesk', -apple-system, system-ui, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  main { max-width: 560px; margin: 0 auto; padding: calc(16px + env(safe-area-inset-top)) 16px calc(96px + env(safe-area-inset-bottom)); }
+
+  /* Cabecera */
+  .cab { display: flex; align-items: center; gap: 8px; padding: 4px 4px 14px; }
+  .cab h1 { flex: 1; margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -.02em; }
+  .cab h1::first-letter { text-transform: uppercase; }
+  .cab h1 small { font-size: 15px; color: var(--muted); font-weight: 500; margin-left: 6px; }
+  .redondo {
+    width: 44px; height: 44px; flex: 0 0 44px; border-radius: 14px; border: 1px solid var(--line2);
+    background: var(--card); display: flex; align-items: center; justify-content: center;
+  }
+  .redondo:disabled { color: var(--dim); }
+  .mesnav { display: flex; gap: 6px; }
+
+  /* Mosaico */
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .span2 { grid-column: span 2; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 22px; padding: 16px; min-width: 0; }
+  .tile .et { font-size: 12px; color: var(--muted); font-weight: 500; }
+  .tile .val { font-size: 26px; font-weight: 700; letter-spacing: -.02em; margin: 4px 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile .sub { font-size: 12px; color: var(--muted); }
+  .cabtile { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+
+  .hero { background: var(--accent); color: var(--ink); border-radius: 26px; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+  .hero .et { font-size: 14px; font-weight: 600; }
+  .hero .big { font-size: 50px; font-weight: 700; letter-spacing: -.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .pildora { font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 999px; white-space: nowrap; }
+  .hero .pildora { background: var(--ink); color: var(--accent); }
+  .barras { display: flex; align-items: flex-end; gap: 2px; height: 56px; }
+  .barras button { flex: 1; height: 100%; padding: 0; border: 0; background: none; display: flex; align-items: flex-end; min-width: 0; }
+  .barras i { display: block; width: 100%; border-radius: 3px 3px 1px 1px; background: var(--ink); }
+  .barras .futuro i { background: rgba(12,12,13,.15); }
+  .eje { display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; opacity: .7; }
+
+  .prog { height: 6px; border-radius: 3px; background: var(--track); position: relative; overflow: hidden; margin: 8px 0 6px; }
+  .prog i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--accent); min-width: 2px; }
+
+  /* Formularios */
+  .seg { display: flex; background: var(--bg); border: 1px solid var(--line2); border-radius: 14px; padding: 3px; gap: 3px; }
+  .seg label { flex: 1; position: relative; }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg span { display: block; text-align: center; padding: 8px 6px; border-radius: 11px; font-size: 14px; font-weight: 600; color: var(--muted); }
+  .seg input:checked + span { background: var(--text); color: var(--ink); }
+  .importe { display: flex; gap: 8px; flex: 1; min-width: 0; }
+  .importe label { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 4px; background: var(--bg); border: 1px solid var(--line2); border-radius: 16px; padding: 8px 14px; }
+  .importe input { flex: 1; min-width: 0; border: 0; background: none; font-size: 26px; font-weight: 700; outline: none; }
+  .importe span { color: var(--dim); font-size: 18px; }
+  .mas { width: 60px; flex: 0 0 60px; border: 0; border-radius: 16px; background: var(--accent); color: var(--ink); display: flex; align-items: center; justify-content: center; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips label { position: relative; }
+  .chips input { position: absolute; opacity: 0; pointer-events: none; }
+  .chips span {
+    display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-radius: 12px;
+    border: 1px solid var(--line2); color: var(--text2); font-size: 13px; font-weight: 600;
+  }
+  .chips input:checked + span { background: var(--text); border-color: var(--text); color: var(--ink); }
+  .chips input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .campo { width: 100%; min-width: 0; border: 1px solid var(--line2); background: var(--bg); border-radius: 12px; padding: 10px 12px; outline: none; }
+  .campo:focus { border-color: var(--muted); }
+  .fila { display: flex; gap: 8px; align-items: center; }
+  .fila > input[type="date"] { flex: 0 0 148px; }
+  .pila { display: flex; flex-direction: column; gap: 12px; }
+  .boton { height: 50px; border: 0; border-radius: 16px; background: var(--accent); color: var(--ink); font-weight: 700; padding: 0 18px; }
+  .boton.sec { background: none; border: 1px solid var(--line2); color: var(--text); }
+  .boton.peq { height: 40px; border-radius: 12px; font-size: 14px; padding: 0 14px; }
+  .boton:disabled { opacity: .5; }
+  .etq { font-size: 12px; color: var(--muted); font-weight: 500; margin-bottom: -4px; }
+
+  /* Listas */
+  .lista .item { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid var(--line); }
+  .lista .item:first-child { border-top: 0; }
+  .punto { width: 10px; height: 10px; flex: 0 0 10px; border-radius: 5px; display: inline-block; }
+  .que { flex: 1; min-width: 0; }
+  .que b { display: block; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .que small { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cifra { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pos { color: var(--accent); }
+  .neg { color: var(--bad); }
+  .x {
+    width: 34px; height: 34px; flex: 0 0 34px; border: 0; border-radius: 10px; background: none; color: var(--dim);
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+  }
+  .x.seguro { width: auto; flex: 0 0 auto; padding: 0 10px; background: var(--bad); color: var(--ink); }
+  .dia { font-size: 12px; color: var(--muted); font-weight: 600; margin: 16px 0 2px; }
+  .dia::first-letter { text-transform: uppercase; }
+  .vacio { color: var(--muted); font-size: 14px; padding: 6px 0; }
+  .nota { color: var(--dim); font-size: 12px; margin-top: 4px; }
+  .enlace { background: none; border: 0; color: var(--accent); font-weight: 600; font-size: 14px; padding: 8px 0; }
+
+  /* Más */
+  .menu { display: flex; flex-direction: column; gap: 8px; }
+  .menu button {
+    display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 14px 16px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+  }
+  .menu .ico { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 12px; background: var(--track); display: flex; align-items: center; justify-content: center; color: var(--accent); }
+  .menu .flecha { color: var(--dim); font-size: 22px; }
+
+  /* Estadísticas */
+  .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+  .cal .ds { font-size: 11px; color: var(--dim); text-align: center; padding-bottom: 2px; }
+  .cal button { aspect-ratio: 1; border: 0; border-radius: 8px; font-size: 11px; font-weight: 600; padding: 0; display: flex; align-items: center; justify-content: center; }
+  .barrasv { display: flex; align-items: flex-end; gap: 8px; height: 124px; }
+  .barrasv .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; height: 100%; min-width: 0; }
+  .barrasv .col i { display: block; width: 100%; border-radius: 4px 4px 1px 1px; background: var(--accent); }
+  .barrasv .col.tenue i { background: var(--line2); }
+  .barrasv .col span { font-size: 11px; color: var(--muted); }
+  .barrasv .col em { font-size: 10px; color: var(--text2); font-style: normal; white-space: nowrap; }
+  .ley { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--muted); margin-top: 10px; flex-wrap: wrap; }
+  .ley i { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+
+  /* Pestañas */
+  .tabs {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    background: rgba(12,12,13,.92); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid var(--line); padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+  }
+  .tabs div { max-width: 560px; margin: 0 auto; display: flex; }
+  .tabs button {
+    flex: 1; border: 0; background: none; color: var(--dim); display: flex; flex-direction: column; align-items: center;
+    gap: 3px; padding: 6px 0; font-size: 11px; font-weight: 600; min-height: 50px;
+  }
+  .tabs button[aria-current="page"] { color: var(--accent); }
+
+  /* Hoja inferior */
+  .velo { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.6); display: flex; align-items: flex-end; justify-content: center; }
+  .modal {
+    width: 100%; max-width: 560px; max-height: 88vh; overflow: auto; background: var(--card); border: 1px solid var(--line2);
+    border-radius: 26px 26px 0 0; padding: 18px 16px calc(20px + env(safe-area-inset-bottom));
+  }
+  .modal .cabtile h2 { margin: 0; font-size: 20px; }
+
+  .aviso {
+    position: fixed; left: 16px; right: 16px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 30;
+    max-width: 528px; margin: 0 auto; background: var(--text); color: var(--ink); padding: 12px 16px; border-radius: 14px;
+    font-size: 14px; font-weight: 600; opacity: 0; transform: translateY(10px); transition: .2s; pointer-events: none;
+  }
+  .aviso.ver { opacity: 1; transform: none; }
+  .carga { position: fixed; top: 0; left: 0; height: 3px; background: var(--accent); width: 0; z-index: 40; transition: width .4s; }
+  .carga.ver { width: 70%; }
+  .cargando { color: var(--muted); padding: 60px 0; text-align: center; }
+</style>
+</head>
+<body data-k="<?= clave ?>">
+<div class="carga" id="carga"></div>
+<main>
+  <header class="cab">
+    <button class="redondo" id="atras" aria-label="Volver" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <h1 id="titulo">Gastos</h1>
+    <div class="mesnav" id="mesnav">
+      <button class="redondo" id="antes" aria-label="Mes anterior"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <button class="redondo" id="despues" aria-label="Mes siguiente"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></button>
+    </div>
+  </header>
+  <div id="vista"><div class="cargando">Cargando…</div></div>
+</main>
+
+<nav class="tabs" aria-label="Apartados"><div id="tabs"></div></nav>
+
+<div class="velo" id="velo" hidden>
+  <form class="modal" id="modal" autocomplete="off">
+    <div class="cabtile"><h2 id="modalTitulo"></h2><button type="button" class="redondo" id="cerrar" aria-label="Cerrar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div id="modalCuerpo" class="pila"></div>
+  </form>
+</div>
+<div class="aviso" id="aviso" role="status"></div>
+
+<script>
+  // Dirección del servidor de Google: la usa la web propia (en GitHub) para leer y guardar.
+  const API = 'https://script.google.com/macros/s/AKfycbxyNohrZ8It8cPh2XLZ9dTTq7b6SmfoVIYS073xTVMbgW-jPLy_63Un6jDv-E2A0ikD/exec';
+  const EN_GOOGLE = !!(window.google && google.script && google.script.run);
+  const K = leerClave();
+  const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const MES_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  const PALETA = ['#5aa2ff', '#ff8a4c', '#3fd69b', '#ffc247', '#ff8fc7', '#c3a6ff', '#2ec4b6', '#9a9aa1', '#e0e07a', '#ff6b9a'];
+  const fmt = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' });
+  const eur = n => fmt.format(n);
+  const $ = id => document.getElementById(id);
+
+  const ICONOS = {
+    inicio: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>',
+    movs: '<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+    ahorro: '<path d="M19 9a7 7 0 1 0-13 4l-1 5h4l1-1h4l1 1h4l-1-5"/><path d="M12 7v4M10 9h4"/>',
+    fijos: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
+    mas: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
+    proyectos: '<path d="M3 7h18v13H3z"/><path d="M8 7V4h8v3"/>',
+    deudas: '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M19 8v6M16 11h6"/>',
+    deseos: '<path d="M12 21s-8-5-8-11a5 5 0 0 1 8-4 5 5 0 0 1 8 4c0 6-8 11-8 11z"/>',
+    stats: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+    temas: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',
+    conexiones: '<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
+    mas1: '<path d="M12 5v14M5 12h14"/>',
+  };
+  const ico = (n, s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONOS[n]}</svg>`;
+
+  const TABS = [['inicio', 'Inicio'], ['movs', 'Movimientos'], ['ahorro', 'Ahorro'], ['fijos', 'Fijos'], ['mas', 'Más']];
+  const SUB = {
+    proyectos: 'Proyectos', deudas: 'Quién me debe', deseos: 'Lista de deseos',
+    stats: 'Estadísticas', temas: 'Temas y presupuestos', conexiones: 'Atajos y widget',
+  };
+
+  let D = null;
+  let mes = null;
+  let vista = 'inicio';
+  let filtroMovs = 'todos';
+  let alGuardar = null;
+  try { vista = localStorage.getItem('gastos.vista') || 'inicio'; } catch (e) {}
+  if (!TABS.some(t => t[0] === vista) && !SUB[vista]) vista = 'inicio';
+
+  // ---------- Servidor ----------
+
+  // Dentro de Google la clave llega en la página; en la web propia, por ?k= la primera vez y luego se recuerda.
+  function leerClave() {
+    const dk = document.body.dataset.k;
+    if (dk && !dk.startsWith('<?')) return dk;
+    const q = new URLSearchParams(location.search).get('k');
+    if (q) {
+      try { localStorage.setItem('gastos.k', q); } catch (e) {}
+      return q;
+    }
+    try { return localStorage.getItem('gastos.k') || ''; } catch (e) { return ''; }
+  }
+
+  function run(fn, ...args) {
+    if (EN_GOOGLE) {
+      return new Promise((ok, ko) => google.script.run.withSuccessHandler(ok).withFailureHandler(ko)[fn](K, ...args));
+    }
+    return llamarApi(fn, args);
+  }
+
+  // text/plain evita la comprobación previa del navegador, que el servidor de Google no contesta.
+  async function llamarApi(fn, args) {
+    const r = fn === 'datos'
+      ? await fetch(API + '?accion=datos&k=' + encodeURIComponent(K) + (args[0] ? '&mes=' + args[0] : ''))
+      : await fetch(API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ api: fn, k: K, que: args[0], d: args[1], mes: args[2] }),
+        });
+    let j;
+    try { j = await r.json(); } catch (e) { throw new Error('El servidor no ha contestado bien, prueba otra vez'); }
+    if (j && j.error) throw new Error(j.error);
+    return j;
+  }
+
+  function pantallaClave(error) {
+    $('mesnav').hidden = true;
+    $('titulo').textContent = 'Gastos';
+    $('vista').innerHTML = `<form class="tile pila" id="formClave" autocomplete="off">
+        <div class="et">${error ? esc(error) + '. ' : ''}Escribe tu clave para entrar (solo la primera vez).</div>
+        <input class="campo" name="clave" placeholder="Clave" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <button class="boton">Entrar</button>
+      </form>`;
+    $('formClave').onsubmit = e => {
+      e.preventDefault();
+      const c = new FormData(e.target).get('clave').trim();
+      if (c) location.href = location.pathname + '?k=' + encodeURIComponent(c);
+    };
+  }
+
+  function cargando(si) { $('carga').classList.toggle('ver', si); }
+
+  async function cargar(m) {
+    cargando(true);
+    try {
+      D = await run('datos', m || null);
+      mes = D.mes;
+      pintar();
+    } catch (e) {
+      if (/clave/i.test(e.message) && !EN_GOOGLE) pantallaClave(e.message);
+      else avisar('Error: ' + e.message);
+    }
+    cargando(false);
+  }
+
+  async function hacer(que, d) {
+    cargando(true);
+    try {
+      const r = await run('accion', que, d, mes);
+      D = r.datos;
+      mes = D.mes;
+      pintar();
+      if (r.msg) avisar(r.msg);
+      return true;
+    } catch (e) {
+      avisar('Error: ' + e.message);
+      return false;
+    } finally {
+      cargando(false);
+    }
+  }
+
+  // ---------- Utilidades ----------
+
+  function avisar(texto) {
+    const a = $('aviso');
+    a.textContent = texto;
+    a.classList.add('ver');
+    clearTimeout(avisar.t);
+    avisar.t = setTimeout(() => a.classList.remove('ver'), 3800);
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  const nombreMes = m => MESES[Number(m.slice(5)) - 1];
+  const mesCorto = m => MES_CORTO[Number(m.slice(5)) - 1];
+  function moverMes(m, n) {
+    const [y, mm] = m.split('-').map(Number);
+    const t = y * 12 + mm - 1 + n;
+    return Math.floor(t / 12) + '-' + String(t % 12 + 1).padStart(2, '0');
+  }
+  const fechaLarga = dia => new Date(dia + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+  const fechaCorta = dia => Number(dia.slice(8)) + ' ' + MES_CORTO[Number(dia.slice(5, 7)) - 1];
+  function hoyISO() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  // El color de un tema sale de su posición en la lista, así no cambia al filtrar.
+  function colorTema(tema, tipo = 'gasto') {
+    if (tipo === 'ingreso') return 'var(--accent)';
+    const i = D.temas.filter(t => t.tipo === 'gasto').findIndex(t => t.tema === tema);
+    return i < 0 ? 'var(--dim)' : PALETA[i % PALETA.length];
+  }
+
+  const borrar = (act, attrs) => `<button type="button" class="x" data-act="${act}" data-peligro ${attrs} aria-label="Borrar">✕</button>`;
+  const vacio = t => `<div class="vacio">${t}</div>`;
+
+  // ---------- Pintar ----------
+
+  function pintar() {
+    const esSub = !!SUB[vista];
+    const conMes = ['inicio', 'movs', 'stats'].includes(vista);
+    $('atras').hidden = !esSub;
+    $('mesnav').hidden = !conMes;
+    $('despues').disabled = mes >= D.hoy;
+    const anio = mes.slice(0, 4) !== D.hoy.slice(0, 4) ? ' ' + mes.slice(0, 4) : '';
+    if (vista === 'inicio') $('titulo').innerHTML = esc(nombreMes(mes)) + (anio ? `<small>${anio}</small>` : '');
+    else if (conMes) $('titulo').innerHTML = esc(SUB[vista] || 'Movimientos') + `<small>${esc(mesCorto(mes) + anio)}</small>`;
+    else $('titulo').textContent = SUB[vista] || TABS.find(t => t[0] === vista)[1];
+
+    const tabActiva = esSub ? 'mas' : vista;
+    $('tabs').innerHTML = TABS.map(([id, txt]) =>
+      `<button type="button" data-tab="${id}" ${id === tabActiva ? 'aria-current="page"' : ''}>${ico(id, 22)}<span>${txt}</span></button>`).join('');
+
+    $('vista').innerHTML = VISTAS[vista]();
+    if (vista === 'inicio') prepararFormMov($('rapido'));
+  }
+
+  function chip(name, value, texto, marcado, color) {
+    return `<label><input type="radio" name="${name}" value="${esc(value)}" ${marcado ? 'checked' : ''}><span>${color ? `<i class="punto" style="background:${color}"></i>` : ''}${esc(texto)}</span></label>`;
+  }
+
+  // Formulario de movimiento: lo usan la tarjeta rápida de Inicio y la hoja de Movimientos.
+  function formMov(conBoton) {
+    const proy = D.proyectos.length
+      ? `<div class="etq">Proyecto</div><div class="chips">${chip('proyecto', '', 'Ninguno', true)}${D.proyectos.map(p => chip('proyecto', p.nombre, p.nombre)).join('')}</div>`
+      : '';
+    return `
+      <div class="seg" role="radiogroup" aria-label="Tipo">
+        <label><input type="radio" name="tipo" value="gasto" checked><span>Gasto</span></label>
+        <label><input type="radio" name="tipo" value="ingreso"><span>Ingreso</span></label>
+      </div>
+      <div class="importe">
+        <label><input name="importe" inputmode="decimal" placeholder="0,00" aria-label="Importe"><span>€</span></label>
+        ${conBoton ? `<button class="mas" aria-label="Apuntar">${ico('mas1', 24)}</button>` : ''}
+      </div>
+      <div class="chips" data-temas></div>
+      <div class="fila">
+        <input class="campo" name="nota" placeholder="Nota (opcional)">
+        <input class="campo" name="fecha" type="date" value="${hoyISO()}" aria-label="Fecha">
+      </div>
+      ${proy}
+      ${conBoton ? '' : '<button class="boton">Apuntar</button>'}`;
+  }
+
+  function prepararFormMov(form) {
+    const pintarTemas = () => {
+      const tipo = form.querySelector('[name=tipo]:checked').value;
+      form.querySelector('[data-temas]').innerHTML = D.temas.filter(t => t.tipo === tipo)
+        .map(t => chip('tema', t.tema, t.tema, false, tipo === 'gasto' ? colorTema(t.tema) : '')).join('');
+    };
+    form.querySelectorAll('[name=tipo]').forEach(r => r.addEventListener('change', pintarTemas));
+    pintarTemas();
+  }
+
+  async function enviarMov(form) {
+    const f = Object.fromEntries(new FormData(form));
+    if (!f.importe) { avisar('Escribe el importe'); return false; }
+    if (!f.tema) { avisar('Elige un tema'); return false; }
+    if (f.fecha === hoyISO()) f.fecha = '';
+    mes = f.fecha ? f.fecha.slice(0, 7) : D.hoy;
+    return hacer('mov', f);
+  }
+
+  const VISTAS = {
+    inicio() {
+      const dif = D.anterior > 0 ? Math.round((D.gastos - D.anterior) / D.anterior * 100) : null;
+      const max = Math.max(1, ...D.diario);
+      const barras = D.diario.map((v, i) => {
+        const fut = i + 1 > D.dias;
+        return `<button type="button" class="${fut ? 'futuro' : ''}" data-act="verDia" data-dia="${i + 1}" data-v="${v}" aria-label="Día ${i + 1}: ${eur(v)}"><i style="height:${fut ? 3 : Math.max(3, v / max * 56)}px"></i></button>`;
+      }).join('');
+      const top = D.porTema[0] && D.porTema[0].total > 0 ? D.porTema[0] : null;
+      const presu = D.porTema.filter(t => t.presupuesto > 0);
+      const sinPresu = D.porTema.filter(t => !t.presupuesto && t.total > 0).slice(0, 3);
+      const totalAhorrado = D.huchas.reduce((s, h) => s + h.ahorrado, 0);
+      const proximos = D.fijos.filter(f => (new Date(f.proximo + 'T12:00:00') - new Date()) / 864e5 <= 7);
+
+      return `<div class="grid">
+        <div class="hero span2">
+          <div class="cabtile" style="margin:0"><div class="et">Gastado en ${esc(nombreMes(mes))}</div>
+            ${dif === null ? '' : `<div class="pildora">${dif > 0 ? '+' : ''}${dif} % vs ${esc(mesCorto(moverMes(mes, -1)))}</div>`}</div>
+          <div class="big">${eur(D.gastos)}</div>
+          <div class="barras" role="group" aria-label="Gasto de cada día">${barras}</div>
+          <div class="eje"><span>1</span><span>${Math.ceil(D.diasMes / 2)}</span><span>${D.diasMes}</span></div>
+        </div>
+
+        <div class="tile">
+          ${D.ingresos > 0
+            ? `<div class="et">Te quedan</div><div class="val ${D.queda < 0 ? 'neg' : ''}">${eur(D.queda)}</div><div class="sub">Entró ${eur(D.ingresos)}${D.ahorradoMes ? ' · ahorro ' + eur(D.ahorradoMes) : ''}</div>`
+            : `<div class="et">Te quedan</div><div class="val" style="color:var(--dim)">—</div><div class="sub">Apunta tus ingresos para verlo</div>`}
+        </div>
+        <div class="tile"><div class="et">Media diaria</div><div class="val">${eur(D.dias ? D.gastos / D.dias : 0)}</div><div class="sub">${D.dias} ${D.dias === 1 ? 'día' : 'días'}</div></div>
+        <div class="tile"><div class="et">Donde más</div><div class="val">${top ? esc(top.tema) : '—'}</div><div class="sub">${top ? eur(top.total) + ' · ' + Math.round(top.total / D.gastos * 100) + ' %' : 'Sin gastos'}</div></div>
+        <div class="tile"><div class="et">Días sin gastar</div><div class="val">${D.sinGastar}</div><div class="sub">Racha: ${D.racha} ${D.racha === 1 ? 'día' : 'días'}</div></div>
+
+        <form class="tile span2 pila" id="rapido" data-form="mov" autocomplete="off">
+          <div class="et">Apuntar</div>
+          ${formMov(true)}
+        </form>
+
+        ${presu.map(t => {
+          const uso = t.total / t.presupuesto;
+          const c = uso > 1 ? 'var(--bad)' : uso >= 0.8 ? 'var(--warn)' : 'var(--accent)';
+          return `<div class="tile" style="${uso > 1 ? 'border-color:#5a2621' : ''}">
+            <div class="cabtile" style="margin:0"><div class="et">${esc(t.tema)}</div><div class="pildora" style="background:${c};color:var(--ink)">${Math.round(uso * 100)} %</div></div>
+            <div class="val" style="font-size:22px">${eur(t.total)}</div>
+            <div class="prog"><i style="width:${Math.min(100, uso * 100)}%;background:${c}"></i></div>
+            <div class="sub">${uso > 1 ? 'Pasado ' + eur(t.total - t.presupuesto) : 'Quedan ' + eur(t.presupuesto - t.total)}</div>
+          </div>`;
+        }).join('')}
+        ${sinPresu.length ? `<div class="tile ${presu.length % 2 ? '' : 'span2'}"><div class="et">Sin presupuesto</div>
+          <div style="font-size:14px;line-height:1.7;margin-top:6px">${sinPresu.map(t => `${esc(t.tema)} <span style="color:var(--muted)">${eur(t.total)}</span>`).join('<br>')}</div></div>` : ''}
+
+        ${proximos.length ? `<div class="tile span2"><div class="cabtile"><div class="et">Próximos cobros</div><button type="button" class="enlace" data-tab="fijos">Ver fijos</button></div>
+          <div class="lista">${proximos.map(f => `<div class="item"><span class="punto" style="background:${colorTema(f.tema)}"></span><div class="que"><b>${esc(f.nombre)}</b><small>${fechaCorta(f.proximo)}</small></div><div class="cifra">${eur(f.importe)}</div></div>`).join('')}</div></div>` : ''}
+
+        ${D.huchas.length ? `<div class="tile span2"><div class="cabtile"><div class="et">Ahorrado</div><button type="button" class="enlace" data-tab="ahorro">Ver huchas</button></div>
+          <div class="val">${eur(totalAhorrado)}</div>
+          ${D.huchas.slice(0, 2).map(h => `<div style="margin-top:10px"><div class="cabtile" style="margin:0;font-size:13px"><span>${esc(h.nombre)}</span><span style="color:var(--muted)">${eur(h.ahorrado)} / ${eur(h.meta)}</span></div><div class="prog"><i style="width:${Math.min(100, h.ahorrado / h.meta * 100)}%"></i></div></div>`).join('')}
+        </div>` : ''}
+
+        <div class="tile span2"><div class="cabtile"><div class="et">Últimos</div><button type="button" class="enlace" data-tab="movs">Ver todos</button></div>
+          <div class="lista">${D.movs.length ? D.movs.slice(0, 5).map(m => filaMov(m)).join('') : vacio('Nada apuntado este mes.')}</div>
+        </div>
+      </div>`;
+    },
+
+    movs() {
+      const lista = D.movs.filter(m => filtroMovs === 'todos' || m.tipo === filtroMovs);
+      let html = '', dia = '';
+      lista.forEach(m => {
+        if (m.dia !== dia) { dia = m.dia; html += `<div class="dia">${fechaLarga(dia)}</div>`; }
+        html += filaMov(m, true);
+      });
+      return `<div class="pila">
+        <div class="grid">
+          <div class="tile"><div class="et">Gastos</div><div class="val">${eur(D.gastos)}</div></div>
+          <div class="tile"><div class="et">Ingresos</div><div class="val pos">${eur(D.ingresos)}</div></div>
+        </div>
+        <div class="fila">
+          <div class="seg" style="flex:1" role="radiogroup" aria-label="Filtrar">
+            ${['todos', 'gasto', 'ingreso'].map(f => `<label><input type="radio" name="filtro" value="${f}" data-act="filtro" ${filtroMovs === f ? 'checked' : ''}><span>${{ todos: 'Todos', gasto: 'Gastos', ingreso: 'Ingresos' }[f]}</span></label>`).join('')}
+          </div>
+          <button type="button" class="mas" style="height:44px" data-act="nuevoMov" aria-label="Apuntar movimiento">${ico('mas1', 22)}</button>
+        </div>
+        <div class="tile lista" style="padding-top:4px">${html || vacio('Nada por aquí.')}</div>
+      </div>`;
+    },
+
+    ahorro() {
+      const total = D.huchas.reduce((s, h) => s + h.ahorrado, 0);
+      return `<div class="pila">
+        <div class="hero"><div class="et">Ahorrado en total</div><div class="big">${eur(total)}</div>
+          <div class="et" style="font-weight:500">${D.ahorradoMes ? (D.ahorradoMes > 0 ? '+' : '') + eur(D.ahorradoMes) + ' este mes' : 'Crea una hucha y ve llenándola'}</div></div>
+        ${D.huchas.map(h => {
+          const pct = Math.min(100, Math.round(h.ahorrado / h.meta * 100));
+          const hecho = h.ahorrado >= h.meta;
+          return `<div class="tile">
+            <div class="cabtile"><b style="font-size:17px">${esc(h.nombre)}</b>${borrar('borrarHucha', `data-id="${esc(h.id)}"`)}</div>
+            <div class="fila" style="justify-content:space-between;align-items:baseline"><div class="val">${eur(h.ahorrado)}</div><div class="sub">de ${eur(h.meta)} · ${pct} %</div></div>
+            <div class="prog" style="height:10px;border-radius:5px"><i style="width:${pct}%"></i></div>
+            <div class="sub">${hecho ? '¡Conseguido!' : h.fin ? 'A este ritmo, lo tendrás en ' + nombreMes(h.fin) + ' de ' + h.fin.slice(0, 4) : 'Añade dinero para calcular cuándo llegarás'}</div>
+            <div class="fila" style="margin-top:12px">
+              <button type="button" class="boton peq" style="flex:1" data-act="aportar" data-id="${esc(h.id)}">Añadir</button>
+              <button type="button" class="boton peq sec" style="flex:1" data-act="sacar" data-id="${esc(h.id)}">Sacar</button>
+            </div>
+          </div>`;
+        }).join('')}
+        <button type="button" class="boton sec" data-act="nuevaHucha">Nueva hucha</button>
+        <div class="nota">Lo que metes en una hucha cuenta como ahorro del mes y se resta de "Te quedan".</div>
+      </div>`;
+    },
+
+    fijos() {
+      const mensual = D.fijos.reduce((s, f) => s + f.importe, 0);
+      return `<div class="pila">
+        <div class="hero"><div class="et">Al año pagas</div><div class="big">${eur(mensual * 12)}</div>
+          <div class="et" style="font-weight:500">${eur(mensual)} al mes en ${D.fijos.length} ${D.fijos.length === 1 ? 'gasto fijo' : 'gastos fijos'}</div></div>
+        <div class="tile lista">${D.fijos.length ? D.fijos.map(f => `<div class="item">
+            <span class="punto" style="background:${colorTema(f.tema)}"></span>
+            <div class="que"><b>${esc(f.nombre)}</b><small>Próximo cobro ${fechaCorta(f.proximo)} · ${esc(f.tema)}</small></div>
+            <div class="cifra">${eur(f.importe)}</div>${borrar('borrarFijo', `data-id="${esc(f.id)}"`)}
+          </div>`).join('') : vacio('Añade Spotify, el gimnasio, el móvil…')}</div>
+        <button type="button" class="boton sec" data-act="nuevoFijo">Añadir gasto fijo</button>
+        <div class="nota">Se apuntan solos el día de cobro y el día antes te llega un correo.</div>
+      </div>`;
+    },
+
+    mas() {
+      const teDeben = D.deudas.filter(d => !d.pagada && d.sentido === 'me_debe').reduce((s, d) => s + d.importe, 0);
+      const esperando = D.deseos.filter(d => d.estado === 'esperando').length;
+      const filas = [
+        ['proyectos', D.proyectos.length ? D.proyectos.length + (D.proyectos.length === 1 ? ' proyecto' : ' proyectos') : '¿Ganan o pierden dinero?'],
+        ['deudas', teDeben ? 'Te deben ' + eur(teDeben) : 'Préstamos entre amigos'],
+        ['deseos', esperando ? esperando + ' esperando 48 h' : 'Piénsalo antes de comprar'],
+        ['stats', 'Calendario, rachas y meses'],
+        ['temas', 'Presupuestos y temas'],
+        ['conexiones', 'Resumen del domingo, widget e ingresos'],
+      ];
+      return `<div class="menu">${filas.map(([id, sub]) => `<button type="button" data-sub="${id}">
+          <span class="ico">${ico(id)}</span><span class="que"><b>${SUB[id]}</b><small>${esc(sub)}</small></span><span class="flecha">›</span>
+        </button>`).join('')}</div>
+        <div class="nota" style="text-align:center;margin-top:20px"><a href="${esc(D.urlHoja)}" target="_blank" style="color:var(--muted)">Abrir la hoja de Google</a></div>`;
+    },
+
+    proyectos() {
+      return `<div class="pila">
+        ${D.proyectos.map(p => {
+          const bal = p.ingresos - p.gastos;
+          return `<div class="tile">
+            <div class="cabtile"><b style="font-size:17px">${esc(p.nombre)}</b>${borrar('borrarProyecto', `data-nombre="${esc(p.nombre)}"`)}</div>
+            <div class="val ${bal >= 0 ? 'pos' : 'neg'}">${bal > 0 ? '+' : ''}${eur(bal)}</div>
+            <div class="sub">Gastos ${eur(p.gastos)} · Ingresos ${eur(p.ingresos)} · ${p.movimientos} mov.</div>
+            ${p.gastosMes || p.ingresosMes ? `<div class="sub" style="margin-top:4px">En ${esc(nombreMes(mes))}: −${eur(p.gastosMes)} / +${eur(p.ingresosMes)}</div>` : ''}
+          </div>`;
+        }).join('') || vacio('Aún no hay proyectos.')}
+        <form class="fila" data-form="proyecto" autocomplete="off"><input class="campo" name="nombre" placeholder="Nuevo proyecto (KDP, STL…)"><button class="boton peq">Añadir</button></form>
+        <div class="nota">Al apuntar un gasto o ingreso, elige su proyecto y aquí verás si gana o pierde dinero.</div>
+      </div>`;
+    },
+
+    deudas() {
+      const pend = D.deudas.filter(d => !d.pagada);
+      const pagadas = D.deudas.filter(d => d.pagada).slice(0, 10);
+      const suma = s => pend.filter(d => d.sentido === s).reduce((t, d) => t + d.importe, 0);
+      const fila = d => `<div class="item">
+          <div class="que"><b>${esc(d.persona)}</b><small>${esc(d.concepto || (d.sentido === 'me_debe' ? 'Te debe' : 'Le debes'))} · ${fechaCorta(d.dia)}</small></div>
+          <div class="cifra ${d.sentido === 'me_debe' ? 'pos' : ''}" style="${d.sentido === 'debo' ? 'color:var(--warn)' : ''}">${eur(d.importe)}</div>
+          ${d.pagada ? '' : `<button type="button" class="boton peq sec" data-act="pagarDeuda" data-id="${esc(d.id)}">Pagada</button>`}
+          ${borrar('borrarDeuda', `data-id="${esc(d.id)}"`)}
+        </div>`;
+      return `<div class="pila">
+        <div class="grid">
+          <div class="tile"><div class="et">Te deben</div><div class="val pos">${eur(suma('me_debe'))}</div></div>
+          <div class="tile"><div class="et">Debes</div><div class="val" style="color:var(--warn)">${eur(suma('debo'))}</div></div>
+        </div>
+        <div class="tile lista">${pend.length ? pend.map(fila).join('') : vacio('Todo saldado.')}</div>
+        <button type="button" class="boton sec" data-act="nuevaDeuda">Apuntar deuda</button>
+        ${pagadas.length ? `<div class="dia">Pagadas</div><div class="tile lista" style="opacity:.7">${pagadas.map(fila).join('')}</div>` : ''}
+      </div>`;
+    },
+
+    deseos() {
+      const esperando = D.deseos.filter(d => d.estado === 'esperando');
+      const decididos = D.deseos.filter(d => d.estado !== 'esperando').slice(0, 15);
+      const ahorrado = D.deseos.filter(d => d.estado === 'descartado').reduce((s, d) => s + d.precio, 0);
+      return `<div class="pila">
+        <div class="hero"><div class="et">Ahorrado sin comprar</div><div class="big">${eur(ahorrado)}</div>
+          <div class="et" style="font-weight:500">Apunta lo que quieres y espera 48 h antes de decidir</div></div>
+        <form class="tile pila" data-form="deseo" autocomplete="off">
+          <div class="fila"><input class="campo" name="nombre" placeholder="¿Qué quieres?"><input class="campo" name="precio" inputmode="decimal" placeholder="Precio" style="flex:0 0 100px"></div>
+          <button class="boton peq">Apuntar deseo</button>
+        </form>
+        ${esperando.map(d => {
+          const listo = d.horas >= 48;
+          return `<div class="tile">
+            <div class="cabtile"><b style="font-size:16px">${esc(d.nombre)}</b><div class="fila"><span class="cifra">${eur(d.precio)}</span>${borrar('borrarDeseo', `data-id="${esc(d.id)}"`)}</div></div>
+            ${listo
+              ? `<div class="sub">Han pasado 48 h. ¿Lo sigues queriendo?</div>
+                 <div class="fila" style="margin-top:10px"><button type="button" class="boton peq" style="flex:1" data-act="comprar" data-id="${esc(d.id)}">Lo compro</button><button type="button" class="boton peq sec" style="flex:1" data-act="descartar" data-id="${esc(d.id)}">Ya no lo quiero</button></div>`
+              : `<div class="prog"><i style="width:${d.horas / 48 * 100}%;background:var(--warn)"></i></div><div class="sub">Podrás decidir en ${48 - d.horas} h</div>`}
+          </div>`;
+        }).join('')}
+        ${decididos.length ? `<div class="dia">Decididos</div><div class="tile lista">${decididos.map(d => `<div class="item"><div class="que"><b>${esc(d.nombre)}</b><small>${d.estado === 'comprado' ? 'Comprado' : 'Descartado'}</small></div><div class="cifra ${d.estado === 'descartado' ? 'pos' : ''}">${eur(d.precio)}</div>${borrar('borrarDeseo', `data-id="${esc(d.id)}"`)}</div>`).join('')}</div>` : ''}
+      </div>`;
+    },
+
+    stats() {
+      const s = D.stats;
+      const max = Math.max(1, ...D.diario);
+      // Una sola tinta (lima) de menos a más, sobre el fondo oscuro.
+      const tono = v => v <= 0 ? 'var(--track)' : `rgba(200,241,105,${(0.25 + 0.75 * Math.min(1, v / max)).toFixed(2)})`;
+      let cal = ['L', 'M', 'X', 'J', 'V', 'S', 'D'].map(d => `<div class="ds">${d}</div>`).join('');
+      for (let i = 1; i < D.primerDiaSemana; i++) cal += '<div></div>';
+      D.diario.forEach((v, i) => {
+        const fut = i + 1 > D.dias;
+        const fondo = fut ? 'transparent' : tono(v);
+        const color = fut ? 'var(--dim)' : v > max * 0.45 ? 'var(--ink)' : 'var(--text2)';
+        cal += `<button type="button" data-act="verDia" data-dia="${i + 1}" data-v="${v}" style="background:${fondo};color:${color};${fut ? 'border:1px dashed var(--line2)' : ''}" aria-label="Día ${i + 1}: ${eur(v)}">${i + 1}</button>`;
+      });
+      const maxMes = Math.max(1, ...s.meses.map(m => m.gastos));
+      const maxSem = Math.max(...s.semana);
+      const semMax = s.semana.indexOf(maxSem);
+      return `<div class="pila">
+        <div class="grid">
+          <div class="tile"><div class="et">Racha sin gastar</div><div class="val">${D.racha} ${D.racha === 1 ? 'día' : 'días'}</div><div class="sub">Sin contar los fijos</div></div>
+          <div class="tile"><div class="et">Días sin gastar</div><div class="val">${D.sinGastar}</div><div class="sub">en ${esc(nombreMes(mes))}</div></div>
+        </div>
+        <div class="tile"><div class="et" style="margin-bottom:10px">Calendario de ${esc(nombreMes(mes))}</div><div class="cal">${cal}</div>
+          <div class="ley">Menos <i style="background:var(--track)"></i><i style="background:rgba(200,241,105,.35)"></i><i style="background:rgba(200,241,105,.65)"></i><i style="background:var(--accent)"></i> Más · toca un día</div></div>
+        <div class="tile"><div class="et" style="margin-bottom:12px">Gasto de los últimos 6 meses</div>
+          <div class="barrasv">${s.meses.map(m => `<div class="col ${m.mes === mes ? '' : 'tenue'}"><em>${m.gastos ? Math.round(m.gastos) + ' €' : ''}</em><i style="height:${Math.max(2, m.gastos / maxMes * 90)}px"></i><span>${mesCorto(m.mes)}</span></div>`).join('')}</div></div>
+        <div class="tile"><div class="et" style="margin-bottom:12px">Media por día de la semana · últimos 3 meses</div>
+          <div class="barrasv">${s.semana.map((v, i) => `<div class="col ${i === semMax && maxSem > 0 ? '' : 'tenue'}"><em>${v ? Math.round(v) + ' €' : ''}</em><i style="height:${Math.max(2, v / Math.max(1, maxSem) * 90)}px"></i><span>${'LMXJVSD'[i]}</span></div>`).join('')}</div>
+          ${maxSem > 0 ? `<div class="sub" style="margin-top:10px">Gastas más los ${['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábados', 'domingos'][semMax]}.</div>` : ''}</div>
+        <div class="tile"><div class="et">Dónde más gastas · últimos 3 meses</div>
+          <div class="lista" style="margin-top:6px">${s.top.length ? s.top.map((t, i) => `<div class="item"><span class="cifra" style="color:var(--dim);width:18px">${i + 1}</span><div class="que"><b>${esc(t.nota)}</b><small>${t.veces} ${t.veces === 1 ? 'vez' : 'veces'}</small></div><div class="cifra">${eur(t.total)}</div></div>`).join('') : vacio('Escribe notas en tus gastos para ver aquí dónde gastas.')}</div></div>
+      </div>`;
+    },
+
+    temas() {
+      const bloque = tipo => D.temas.filter(t => t.tipo === tipo).map(t => `<div class="item">
+          <span class="punto" style="background:${colorTema(t.tema, tipo)}"></span><div class="que"><b>${esc(t.tema)}</b></div>
+          ${tipo === 'gasto' ? `<input class="campo" style="width:104px;text-align:right" inputmode="decimal" placeholder="Sin límite" value="${t.presupuesto ? String(t.presupuesto).replace('.', ',') : ''}" data-presu="${esc(t.tema)}" aria-label="Presupuesto de ${esc(t.tema)}">` : ''}
+          ${borrar('borrarTema', `data-tema="${esc(t.tema)}" data-tipo="${tipo}"`)}
+        </div>`).join('');
+      return `<div class="pila">
+        <div class="dia" style="margin-top:0">Gastos · presupuesto al mes</div><div class="tile lista">${bloque('gasto')}</div>
+        <div class="dia">Ingresos</div><div class="tile lista">${bloque('ingreso')}</div>
+        <form class="tile pila" data-form="tema" autocomplete="off">
+          <div class="seg"><label><input type="radio" name="tipo" value="gasto" checked><span>Gasto</span></label><label><input type="radio" name="tipo" value="ingreso"><span>Ingreso</span></label></div>
+          <div class="fila"><input class="campo" name="tema" placeholder="Nuevo tema"><button class="boton peq">Añadir</button></div>
+        </form>
+        <div class="nota">Si añades un tema, añádelo también a la lista del atajo, escrito igual.</div>
+      </div>`;
+    },
+
+    conexiones() {
+      const base = D.urlApp + '?k=' + encodeURIComponent(K);
+      const copiable = txt => `<input class="campo" readonly value="${esc(txt)}" data-copiar style="font-size:12px;margin-top:8px" aria-label="Dirección para copiar">`;
+      return `<div class="pila">
+        <div class="tile"><b>Resumen del domingo</b>
+          <div class="sub" style="margin-top:6px;line-height:1.5">En Dreceres → Automatització → Nova automatització → Hora del dia: diumenge 21:00 → Executa immediatament. Acciones: <b>Obtén el contingut de l'URL</b> con esta dirección y <b>Mostra una notificació</b> con el resultado.</div>
+          ${copiable(base + '&accion=resumen')}</div>
+        <div class="tile"><b>Widget con lo gastado</b>
+          <div class="sub" style="margin-top:6px;line-height:1.5">Instala la app gratis <b>Scriptable</b>. Abre este enlace en el iPhone, copia todo el texto, pégalo en un script nuevo de Scriptable y llámalo Gastos. Luego añade un widget de Scriptable a la pantalla de inicio y elige ese script.</div>
+          <a class="boton peq sec" style="display:inline-flex;align-items:center;margin-top:10px;text-decoration:none" href="${esc(base + '&accion=scriptable')}" target="_blank">Abrir el código del widget</a></div>
+        <div class="tile"><b>Atajo "Ingreso"</b>
+          <div class="sub" style="margin-top:6px;line-height:1.5">Duplica el atajo Gasto y llámalo Ingreso. Cambia la lista por: ${D.temas.filter(t => t.tipo === 'ingreso').map(t => esc(t.tema)).join(', ')}. En el JSON añade un campo de texto <b>tipo</b> con el valor <b>ingreso</b>.</div></div>
+        <div class="tile"><b>Avisos de cobros</b>
+          <div class="sub" style="margin-top:6px;line-height:1.5">El día antes de cada gasto fijo te llega un correo a tu Gmail. Activa las notificaciones de Gmail en el iPhone para verlo.</div></div>
+      </div>`;
+    },
+  };
+
+  function filaMov(m, conBorrar) {
+    const ing = m.tipo === 'ingreso';
+    const extra = [m.nota ? m.tema : '', m.proyecto, m.origen === 'fijo' ? 'fijo' : '', conBorrar ? m.hora : fechaCorta(m.dia)].filter(Boolean).join(' · ');
+    return `<div class="item">
+      <span class="punto" style="background:${colorTema(m.tema, m.tipo)}"></span>
+      <div class="que"><b>${esc(m.nota || m.tema)}</b><small>${esc(extra)}</small></div>
+      <div class="cifra ${ing ? 'pos' : ''}">${ing ? '+' : '−'}${eur(m.importe)}</div>
+      ${conBorrar ? borrar('borrarMov', `data-id="${esc(m.id)}"`) : ''}
+    </div>`;
+  }
+
+  // ---------- Hoja inferior ----------
+
+  function abrirModal(titulo, cuerpo, guardar) {
+    $('modalTitulo').textContent = titulo;
+    $('modalCuerpo').innerHTML = cuerpo;
+    alGuardar = guardar;
+    $('velo').hidden = false;
+    const primero = $('modalCuerpo').querySelector('input:not([type=radio]):not([type=date])');
+    if (primero) setTimeout(() => primero.focus(), 50);
+  }
+  function cerrarModal() { $('velo').hidden = true; alGuardar = null; }
+  $('cerrar').onclick = cerrarModal;
+  $('velo').addEventListener('click', e => { if (e.target === $('velo')) cerrarModal(); });
+  $('modal').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!alGuardar) return;
+    const boton = $('modal').querySelector('.boton');
+    if (boton) boton.disabled = true;
+    const ok = await alGuardar(Object.fromEntries(new FormData($('modal'))));
+    if (boton) boton.disabled = false;
+    if (ok) cerrarModal();
+  });
+
+  const campoImporte = (name, ph) => `<div class="importe"><label><input name="${name}" inputmode="decimal" placeholder="${ph || '0,00'}" aria-label="${ph || 'Importe'}"><span>€</span></label></div>`;
+  const opcionesTema = sel => `<div class="chips">${D.temas.filter(t => t.tipo === 'gasto').map(t => chip('tema', t.tema, t.tema, t.tema === sel, colorTema(t.tema))).join('')}</div>`;
+
+  const MODALES = {
+    nuevoMov() {
+      abrirModal('Apuntar', formMov(false), () => enviarMov($('modal')));
+      prepararFormMov($('modal'));
+    },
+    nuevaHucha() {
+      abrirModal('Nueva hucha', `<input class="campo" name="nombre" placeholder="Viaje de verano, ordenador…">${campoImporte('meta', 'Meta')}<button class="boton">Crear hucha</button>`, f => hacer('hucha', f));
+    },
+    aportar(el) {
+      const h = D.huchas.find(x => x.id === el.dataset.id);
+      abrirModal('Añadir a ' + h.nombre, `${campoImporte('importe')}<button class="boton">Añadir</button>`, f => hacer('aporte', { hucha: h.id, importe: f.importe }));
+    },
+    sacar(el) {
+      const h = D.huchas.find(x => x.id === el.dataset.id);
+      abrirModal('Sacar de ' + h.nombre, `${campoImporte('importe')}<div class="sub">Tienes ${eur(h.ahorrado)}.</div><button class="boton">Sacar</button>`, f => hacer('aporte', { hucha: h.id, importe: f.importe, sacar: true }));
+    },
+    nuevoFijo() {
+      abrirModal('Gasto fijo', `<input class="campo" name="nombre" placeholder="Spotify, gimnasio, móvil…">
+        <div class="fila">${campoImporte('importe')}<input class="campo" name="dia" inputmode="numeric" placeholder="Día 1-31" style="flex:0 0 104px" aria-label="Día del mes"></div>
+        <div class="etq">Tema</div>${opcionesTema('Suscripciones')}
+        <button class="boton">Añadir</button>`, f => hacer('fijo', f));
+    },
+    nuevaDeuda() {
+      abrirModal('Apuntar deuda', `<div class="seg"><label><input type="radio" name="sentido" value="me_debe" checked><span>Me debe</span></label><label><input type="radio" name="sentido" value="debo"><span>Le debo</span></label></div>
+        <input class="campo" name="persona" placeholder="¿Quién?">${campoImporte('importe')}
+        <input class="campo" name="concepto" placeholder="Concepto (opcional)"><button class="boton">Apuntar</button>`, f => hacer('deuda', f));
+    },
+    descartar(el) {
+      const d = D.deseos.find(x => x.id === el.dataset.id);
+      if (!D.huchas.length) return hacer('decidirDeseo', { id: d.id });
+      abrirModal('¿Y esos ' + eur(d.precio) + '?', `<div class="sub">Puedes meterlos en una hucha.</div>
+        <div class="chips">${chip('hucha', '', 'No, solo descartar', true)}${D.huchas.map(h => chip('hucha', h.id, h.nombre)).join('')}</div>
+        <button class="boton">Descartar</button>`, f => hacer('decidirDeseo', { id: d.id, hucha: f.hucha }));
+    },
+  };
+
+  // ---------- Eventos ----------
+
+  function ir(v) {
+    vista = v;
+    try { localStorage.setItem('gastos.vista', v); } catch (e) {}
+    pintar();
+    window.scrollTo(0, 0);
+  }
+
+  $('atras').onclick = () => ir('mas');
+  $('antes').onclick = () => cargar(moverMes(mes, -1));
+  $('despues').onclick = () => cargar(moverMes(mes, 1));
+
+  document.addEventListener('click', async e => {
+    const t = e.target.closest('[data-tab],[data-sub],[data-act],[data-copiar]');
+    if (!t || !D) return;
+    if (t.dataset.tab) return ir(t.dataset.tab);
+    if (t.dataset.sub) return ir(t.dataset.sub);
+    if (t.hasAttribute('data-copiar')) { t.select(); return; }
+    const act = t.dataset.act;
+    if (act === 'filtro') { filtroMovs = t.value; return pintar(); }
+    if (act === 'verDia') return avisar(`${t.dataset.dia} de ${nombreMes(mes)}: ${eur(Number(t.dataset.v))}`);
+    // Borrar pide un segundo toque para confirmar.
+    if (t.hasAttribute('data-peligro') && !t.classList.contains('seguro')) {
+      t.classList.add('seguro');
+      t.textContent = '¿Seguro?';
+      setTimeout(() => { t.classList.remove('seguro'); t.textContent = '✕'; }, 3000);
+      return;
+    }
+    if (MODALES[act]) return MODALES[act](t);
+    const d = Object.assign({}, t.dataset);
+    delete d.act;
+    delete d.peligro;
+    t.disabled = true;
+    if (act === 'comprar') await hacer('decidirDeseo', { id: d.id, comprar: true });
+    else await hacer(act, d);
+  });
+
+  document.addEventListener('submit', async e => {
+    const form = e.target.closest('[data-form]');
+    if (!form) return;
+    e.preventDefault();
+    const tipo = form.dataset.form;
+    const boton = form.querySelector('button:not([type=button])');
+    if (boton) boton.disabled = true;
+    if (tipo === 'mov') await enviarMov(form);
+    else await hacer(tipo, Object.fromEntries(new FormData(form)));
+    if (boton) boton.disabled = false;
+  });
+
+  document.addEventListener('change', e => {
+    const i = e.target.closest('[data-presu]');
+    if (i) hacer('tema', { tema: i.dataset.presu, tipo: 'gasto', presupuesto: i.value || '0' });
+  });
+
+  if (K) cargar(null);
+  else pantallaClave();
+</script>
+</body>
+</html>
