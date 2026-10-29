@@ -1,0 +1,934 @@
+/**
+ * Gastos: backend del atajo del iPhone y del panel.
+ *
+ * Una vez: pega este archivo y Panel.html en un proyecto de script.google.com,
+ * ejecuta configurar() y publícalo como aplicación web
+ * (Ejecutar como: yo · Quién tiene acceso: cualquier usuario).
+ * Al actualizar el código, vuelve a ejecutar configurar(): añade lo que falte sin tocar tus datos.
+ */
+
+const TZ = 'Europe/Madrid';
+
+// Columnas de cada pestaña de la hoja. "Gastos" guarda gastos e ingresos.
+const ESQUEMA = {
+  Gastos: ['id', 'fecha', 'importe', 'tema', 'nota', 'tipo', 'proyecto', 'origen'],
+  Temas: ['tema', 'presupuesto', 'tipo'],
+  Huchas: ['id', 'nombre', 'meta', 'creada'],
+  Aportes: ['id', 'fecha', 'hucha', 'importe'],
+  Fijos: ['id', 'nombre', 'importe', 'tema', 'dia', 'ultimo', 'proyecto'],
+  Deudas: ['id', 'fecha', 'persona', 'importe', 'sentido', 'concepto', 'pagada'],
+  Deseos: ['id', 'fecha', 'nombre', 'precio', 'estado', 'decidido'],
+  Proyectos: ['nombre'],
+};
+const TEMAS_GASTO = ['Súper', 'Comida fuera', 'Transporte', 'Ocio', 'Suscripciones', 'Compras', 'Estudios', 'Otros'];
+const TEMAS_INGRESO = ['Sueldo', 'Bizum', 'Ventas', 'Regalos', 'Otros ingresos'];
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+// La app (panel) que se instala en el iPhone. Habla con este servidor por su dirección ?api=.
+const WEB = 'https://hidegalaxy.github.io/gastos/';
+
+// Crea o completa la hoja "Gastos", la clave y el aviso diario. Se puede repetir sin miedo.
+function configurar() {
+  const props = PropertiesService.getScriptProperties();
+  // Una copia de otro proyecto puede traer la hoja de su dueño: si no se puede abrir, se empieza de cero.
+  if (props.getProperty('HOJA')) {
+    try {
+      SpreadsheetApp.openById(props.getProperty('HOJA'));
+    } catch (err) {
+      props.deleteProperty('HOJA');
+      props.deleteProperty('CLAVE');
+    }
+  }
+  if (!props.getProperty('HOJA')) {
+    const nuevo = SpreadsheetApp.create('Gastos');
+    nuevo.setSpreadsheetTimeZone(TZ);
+    nuevo.setSpreadsheetLocale('es_ES');
+    nuevo.getSheets()[0].setName('Gastos');
+    props.setProperty('HOJA', nuevo.getId());
+  }
+  const ss = libro_();
+  Object.keys(ESQUEMA).forEach(nombre => {
+    const h = ss.getSheetByName(nombre) || ss.insertSheet(nombre);
+    const ultima = h.getLastColumn();
+    const cab = ultima ? h.getRange(1, 1, 1, ultima).getValues()[0].map(String) : [];
+    const faltan = ESQUEMA[nombre].filter(c => cab.indexOf(c) < 0);
+    if (faltan.length) h.getRange(1, cab.length + 1, 1, faltan.length).setValues([faltan]);
+    h.setFrozenRows(1);
+  });
+  const g = ss.getSheetByName('Gastos');
+  g.getRange('B:B').setNumberFormat('dd/mm/yyyy hh:mm');
+  g.getRange('C:C').setNumberFormat('#,##0.00 "€"');
+
+  const temas = temas_();
+  if (!temas.length) TEMAS_GASTO.forEach(t => anadir_('Temas', { tema: t, presupuesto: 0, tipo: 'gasto' }));
+  if (!temas.some(t => t.tipo === 'ingreso')) TEMAS_INGRESO.forEach(t => anadir_('Temas', { tema: t, presupuesto: 0, tipo: 'ingreso' }));
+
+  if (!ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'diario')) {
+    ScriptApp.newTrigger('diario').timeBased().everyDays(1).atHour(8).inTimezone(TZ).create();
+  }
+  if (!props.getProperty('CLAVE')) {
+    props.setProperty('CLAVE', Utilities.getUuid().replace(/-/g, '').slice(0, 16));
+  }
+  Logger.log('Hoja: ' + ss.getUrl());
+  Logger.log('Clave: ' + props.getProperty('CLAVE'));
+}
+
+// Cada mañana: apunta los gastos fijos que tocan y avisa por correo de los de mañana.
+function diario() {
+  aplicarFijos_();
+  const manana = new Date(Date.now() + 86400000);
+  const mes = mesDe_(manana);
+  const dia = Number(diaDe_(manana).slice(8));
+  const cobros = fijos_().filter(f => diaEfectivo_(f.dia, mes) === dia);
+  if (!cobros.length) return;
+  const lineas = cobros.map(f => '· ' + f.nombre + ': ' + eur_(f.importe));
+  MailApp.sendEmail(
+    Session.getEffectiveUser().getEmail(),
+    'Mañana te cobran ' + eur_(cobros.reduce((s, f) => s + f.importe, 0)),
+    'Gastos fijos que se cobran mañana:\n\n' + lineas.join('\n') + '\n\nSe apuntarán solos en tu panel.'
+  );
+}
+
+// ---------- Web ----------
+
+// GET ?k=CLAVE                      → panel
+// GET ?k=CLAVE&accion=temas[&tipo=ingreso] → temas, uno por línea
+// GET ?k=CLAVE&accion=resumen      → resumen de la semana (atajo del domingo)
+// GET ?k=CLAVE&accion=widget       → datos para el widget de Scriptable
+// GET ?k=CLAVE&accion=scriptable   → código del widget, listo para copiar
+// GET ?k=CLAVE&accion=datos[&mes=] → datos del panel en JSON (para la web propia)
+// GET (sin clave) o ?accion=instalar → página para instalar Lima en el iPhone
+function doGet(e) {
+  const p = e.parameter;
+  if (p.accion === 'instalar' || (!p.k && !p.accion)) return paginaInstalar_(p.k);
+  if (!claveValida_(p.k)) return p.accion === 'datos' ? json_({ error: 'Clave incorrecta' }) : texto_('Clave incorrecta');
+  if (p.accion === 'temas') {
+    const tipo = p.tipo === 'ingreso' ? 'ingreso' : 'gasto';
+    return texto_(temas_().filter(t => t.tipo === tipo).map(t => t.tema).join('\n'));
+  }
+  if (p.accion === 'resumen') return texto_(resumenSemana_());
+  if (p.accion === 'widget') {
+    return ContentService.createTextOutput(JSON.stringify(widget_())).setMimeType(ContentService.MimeType.JSON);
+  }
+  if (p.accion === 'scriptable') return texto_(codigoScriptable_(p.k));
+  if (p.accion === 'datos') {
+    try {
+      aplicarFijos_();
+      return json_(datos_(p.mes || null));
+    } catch (err) {
+      return json_({ error: err.message });
+    }
+  }
+  const t = HtmlService.createTemplateFromFile('Panel');
+  t.clave = p.k;
+  return t.evaluate()
+    .setTitle('Gastos')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
+}
+
+// POST { k, importe, tema, nota, tipo?, proyecto? } → mensaje para la notificación del atajo
+function doPost(e) {
+  let crudo;
+  try {
+    crudo = JSON.parse(e.postData.contents);
+  } catch (err) {
+    crudo = e.parameter;
+  }
+  // Claves sin mayúsculas ni espacios: "Tipo " del atajo vale igual que "tipo".
+  const d = {};
+  Object.keys(crudo || {}).forEach(c => { d[String(c).trim().toLowerCase()] = crudo[c]; });
+  // Los atajos compartidos llevan la clave en la dirección (…/exec?k=CLAVE) y no en el JSON.
+  if (!d.k && e.parameter && e.parameter.k) d.k = e.parameter.k;
+  // El panel de la web propia escribe por aquí: { api: 'accion', k, que, d, mes } → JSON.
+  if (d.api === 'accion') {
+    try {
+      return json_(accion(d.k, d.que, d.d, d.mes));
+    } catch (err) {
+      return json_({ error: err.message });
+    }
+  }
+  if (!claveValida_(d.k)) return texto_('❌ Clave incorrecta');
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    return texto_(guardarMov_(d));
+  } catch (err) {
+    return texto_('❌ ' + err.message);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ---------- Instalación ----------
+
+// Lo que se ve al abrir la dirección del servidor recién publicado: pide la clave y, con ella,
+// enseña el QR para abrir Lima en el iPhone y manda los enlaces por correo.
+function paginaInstalar_(k) {
+  const exec = ScriptApp.getService().getUrl();
+  const ok = claveValida_(k);
+  const enlaceApp = WEB + '?api=' + idDe_(exec) + '&k=' + encodeURIComponent(k || '');
+  const enlaceAtajos = exec + '?k=' + encodeURIComponent(k || '');
+  if (ok) enviarEnlaces_(enlaceApp, enlaceAtajos);
+
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const cuerpo = ok
+    ? '<h1>¡Tu Lima está lista!</h1>' +
+      '<p>Escanea este código con la <b>cámara del iPhone</b> y abre el enlace en Safari.<br><i>Escaneja aquest codi amb la càmera de l\'iPhone i obre l\'enllaç a Safari.</i></p>' +
+      '<div id="qr"></div>' +
+      '<p class="peq">También te lo hemos enviado por correo. · <i>També te l\'hem enviat per correu.</i></p>' +
+      '<p class="peq">Dirección para los atajos · <i>Adreça per a les dreceres</i>:</p><input readonly value="' + esc(enlaceAtajos) + '" onclick="this.select()">' +
+      '<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>' +
+      '<script>new QRCode(document.getElementById("qr"), { text: ' + JSON.stringify(enlaceApp) + ', width: 260, height: 260, colorDark: "#0c0c0d", colorLight: "#ffffff" });</script>'
+    : '<h1>Instalar Lima</h1>' +
+      '<p>Pega la <b>clave</b> que salió en el registro al ejecutar <b>configurar</b>.<br><i>Enganxa la clau que va sortir al registre en executar configurar.</i></p>' +
+      (k ? '<p class="mal">Esa clave no es correcta. · <i>Aquesta clau no és correcta.</i></p>' : '') +
+      '<form method="get" action="' + esc(exec) + '" target="_top"><input type="hidden" name="accion" value="instalar">' +
+      '<input name="k" placeholder="Clave · Clau" autocomplete="off" required><button>Continuar</button></form>';
+  const html = '<!doctype html><html lang="es"><head><meta charset="utf-8"><style>' +
+    'body{margin:0;background:#0c0c0d;color:#f4f4f2;font:17px/1.45 system-ui,-apple-system,sans-serif;display:flex;justify-content:center}' +
+    'main{max-width:460px;padding:40px 24px;text-align:center}h1{font-size:30px;margin:18px 0 10px}' +
+    '.logo{width:84px;height:84px;border-radius:20px;background:#c8f169;color:#0c0c0d;font:700 54px/84px system-ui;margin:0 auto}' +
+    '#qr{display:inline-block;background:#fff;padding:16px;border-radius:18px;margin:14px 0}i{color:#9a9aa1}.peq{font-size:14px}.mal{color:#ff6b5e}' +
+    'input{width:100%;box-sizing:border-box;padding:12px 14px;border-radius:12px;border:1px solid #2f2f34;background:#161618;color:#f4f4f2;font-size:15px;margin:8px 0}' +
+    'button{width:100%;padding:14px;border:0;border-radius:14px;background:#c8f169;color:#0c0c0d;font-weight:700;font-size:17px;cursor:pointer}' +
+    '</style></head><body><main><div class="logo">€</div>' + cuerpo + '</main></body></html>';
+  return HtmlService.createHtmlOutput(html).setTitle('Instalar Lima')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+// Como mucho un correo cada 10 minutos, aunque se recargue la página.
+function enviarEnlaces_(enlaceApp, enlaceAtajos) {
+  const props = PropertiesService.getScriptProperties();
+  const antes = Number(props.getProperty('ENLACES_ENVIADOS') || 0);
+  if (Date.now() - antes < 10 * 60000) return;
+  props.setProperty('ENLACES_ENVIADOS', String(Date.now()));
+  MailApp.sendEmail(
+    Session.getEffectiveUser().getEmail(),
+    'Tus enlaces de Lima · Els teus enllaços de Lima',
+    '1) Abre esto en el iPhone (Safari) y añádelo a la pantalla de inicio:\n' +
+    '   Obre això a l\'iPhone (Safari) i afegeix-ho a la pantalla d\'inici:\n\n' + enlaceApp + '\n\n' +
+    '2) Dirección para los atajos Gasto e Ingreso:\n' +
+    '   Adreça per a les dreceres Gasto i Ingreso:\n\n' + enlaceAtajos + '\n\n' +
+    'No compartas estos enlaces: llevan tu clave. · No comparteixis aquests enllaços: porten la teva clau.'
+  );
+}
+
+function idDe_(exec) {
+  return (String(exec || '').match(/\/s\/([\w-]+)\//) || [])[1] || '';
+}
+
+// ---------- Llamadas del panel ----------
+
+function datos(k, mes) {
+  comprobar_(k);
+  aplicarFijos_();
+  return datos_(mes);
+}
+
+// Todas las escrituras del panel pasan por aquí y devuelven los datos ya actualizados.
+function accion(k, que, d, mes) {
+  comprobar_(k);
+  if (!ACCIONES_[que]) throw new Error('Acción desconocida: ' + que);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  let msg;
+  try {
+    msg = ACCIONES_[que](d || {});
+  } finally {
+    lock.releaseLock();
+  }
+  return { msg: msg || '', datos: datos_(mes) };
+}
+
+const ACCIONES_ = {
+  mov: d => guardarMov_(d),
+  borrarMov: d => { borrarDonde_('Gastos', r => String(r.id) === d.id); return 'Movimiento borrado'; },
+
+  tema: d => {
+    const tema = limpiar_(d.tema);
+    if (!tema) throw new Error('El tema no puede estar vacío');
+    const tipo = d.tipo === 'ingreso' ? 'ingreso' : 'gasto';
+    const fila = leer_('Temas').find(r => String(r.tema) === tema && tipoDe_(r.tipo) === tipo);
+    const presupuesto = numero_(d.presupuesto) || 0;
+    if (fila) actualizar_('Temas', fila._fila, { presupuesto });
+    else anadir_('Temas', { tema, presupuesto, tipo });
+    return fila ? 'Presupuesto guardado' : 'Tema añadido';
+  },
+  borrarTema: d => {
+    borrarDonde_('Temas', r => String(r.tema) === d.tema && tipoDe_(r.tipo) === (d.tipo || 'gasto'));
+    return 'Tema quitado (sus movimientos se conservan)';
+  },
+
+  hucha: d => {
+    const nombre = limpiar_(d.nombre);
+    const meta = numero_(d.meta);
+    if (!nombre || !(meta > 0)) throw new Error('Pon nombre y meta');
+    anadir_('Huchas', { id: nuevoId_('h'), nombre, meta, creada: new Date() });
+    return 'Hucha creada';
+  },
+  borrarHucha: d => {
+    borrarDonde_('Huchas', r => String(r.id) === d.id);
+    borrarDonde_('Aportes', r => String(r.hucha) === d.id);
+    return 'Hucha borrada';
+  },
+  aporte: d => {
+    const importe = redondear_(numero_(d.importe));
+    if (!(importe > 0)) throw new Error('Importe no válido');
+    anadir_('Aportes', { id: nuevoId_('a'), fecha: new Date(), hucha: d.hucha, importe: d.sacar ? -importe : importe });
+    return d.sacar ? 'Has sacado ' + eur_(importe) : '+' + eur_(importe) + ' a la hucha';
+  },
+
+  fijo: d => {
+    const nombre = limpiar_(d.nombre);
+    const importe = redondear_(numero_(d.importe));
+    const dia = Math.min(31, Math.max(1, Math.round(numero_(d.dia)) || 1));
+    if (!nombre || !(importe > 0)) throw new Error('Pon nombre e importe');
+    // Si el día de cobro de este mes ya pasó, empieza a apuntarse el mes que viene.
+    const ahora = new Date();
+    const mes = mesDe_(ahora);
+    const yaPaso = Number(diaDe_(ahora).slice(8)) >= diaEfectivo_(dia, mes);
+    anadir_('Fijos', {
+      id: nuevoId_('f'), nombre, importe, tema: limpiar_(d.tema) || 'Suscripciones', dia,
+      ultimo: 'm' + (yaPaso ? mes : mesMas_(mes, -1)), proyecto: limpiar_(d.proyecto),
+    });
+    return 'Gasto fijo añadido';
+  },
+  borrarFijo: d => { borrarDonde_('Fijos', r => String(r.id) === d.id); return 'Gasto fijo quitado'; },
+
+  deuda: d => {
+    const persona = limpiar_(d.persona);
+    const importe = redondear_(numero_(d.importe));
+    if (!persona || !(importe > 0)) throw new Error('Pon persona e importe');
+    anadir_('Deudas', {
+      id: nuevoId_('d'), fecha: new Date(), persona, importe,
+      sentido: d.sentido === 'debo' ? 'debo' : 'me_debe', concepto: limpiar_(d.concepto), pagada: '',
+    });
+    return 'Deuda apuntada';
+  },
+  pagarDeuda: d => {
+    const fila = leer_('Deudas').find(r => String(r.id) === d.id);
+    if (fila) actualizar_('Deudas', fila._fila, { pagada: new Date() });
+    return 'Marcada como pagada';
+  },
+  borrarDeuda: d => { borrarDonde_('Deudas', r => String(r.id) === d.id); return 'Deuda borrada'; },
+
+  deseo: d => {
+    const nombre = limpiar_(d.nombre);
+    const precio = redondear_(numero_(d.precio));
+    if (!nombre || !(precio > 0)) throw new Error('Pon nombre y precio');
+    anadir_('Deseos', { id: nuevoId_('w'), fecha: new Date(), nombre, precio, estado: 'esperando', decidido: '' });
+    return 'Apuntado. Decide dentro de 48 h';
+  },
+  decidirDeseo: d => {
+    const fila = leer_('Deseos').find(r => String(r.id) === d.id);
+    if (!fila) throw new Error('No encuentro ese deseo');
+    const precio = Number(fila.precio) || 0;
+    let msg;
+    if (d.comprar) {
+      const compras = temas_().some(t => t.tema === 'Compras' && t.tipo === 'gasto') ? 'Compras' : 'Otros';
+      guardarMov_({ importe: precio, tema: compras, nota: String(fila.nombre), origen: 'deseo' });
+      msg = 'Comprado y apuntado como gasto';
+    } else {
+      if (d.hucha) anadir_('Aportes', { id: nuevoId_('a'), fecha: new Date(), hucha: d.hucha, importe: precio });
+      msg = d.hucha ? 'Descartado: ' + eur_(precio) + ' a la hucha' : 'Descartado. ¡' + eur_(precio) + ' que no gastas!';
+    }
+    actualizar_('Deseos', fila._fila, { estado: d.comprar ? 'comprado' : 'descartado', decidido: new Date() });
+    return msg;
+  },
+  borrarDeseo: d => { borrarDonde_('Deseos', r => String(r.id) === d.id); return 'Quitado de la lista'; },
+
+  proyecto: d => {
+    const nombre = limpiar_(d.nombre);
+    if (!nombre) throw new Error('Pon un nombre');
+    if (!leer_('Proyectos').some(r => String(r.nombre) === nombre)) anadir_('Proyectos', { nombre });
+    return 'Proyecto añadido';
+  },
+  borrarProyecto: d => {
+    borrarDonde_('Proyectos', r => String(r.nombre) === d.nombre);
+    return 'Proyecto quitado (sus movimientos se conservan)';
+  },
+};
+
+// ---------- Cálculos ----------
+
+function datos_(mes) {
+  const ahora = new Date();
+  const hoy = mesDe_(ahora);
+  const hoyDia = diaDe_(ahora);
+  mes = mes || hoy;
+  const movs = movimientos_();
+  const temas = temas_();
+  const aportes = aportes_();
+  const r = resumen_(mes, movs, temas, aportes);
+  const ant = resumen_(mesMas_(mes, -1), movs, temas, aportes);
+  const diasMes = diasDelMes_(mes);
+  const dias = mes === hoy ? Number(hoyDia.slice(8)) : (mes < hoy ? diasMes : 0);
+
+  const diario = new Array(diasMes).fill(0);
+  r.delMes.forEach(x => {
+    if (x.tipo === 'gasto') diario[Number(diaDe_(x.fecha).slice(8)) - 1] += x.importe;
+  });
+
+  // Días sin gastar: no cuentan los fijos, que se apuntan solos.
+  const diasConGasto = new Set(movs.filter(x => x.tipo === 'gasto' && x.origen !== 'fijo').map(x => diaDe_(x.fecha)));
+  let sinGastar = 0;
+  for (let d = 1; d <= dias; d++) {
+    if (!diasConGasto.has(mes + '-' + String(d).padStart(2, '0'))) sinGastar++;
+  }
+  const primerDia = movs.length ? diaDe_(new Date(Math.min.apply(null, movs.map(x => x.fecha.getTime())))) : hoyDia;
+  let racha = 0;
+  for (let t = ahora.getTime(); racha < 366; t -= 86400000) {
+    const dd = diaDe_(new Date(t));
+    if (dd < primerDia || diasConGasto.has(dd)) break;
+    racha++;
+  }
+
+  const fijos = fijos_().map(f => {
+    const proximoMes = String(f.ultimo) === 'm' + hoy ? mesMas_(hoy, 1) : hoy;
+    return {
+      id: f.id, nombre: f.nombre, importe: f.importe, tema: f.tema, dia: f.dia, proyecto: f.proyecto,
+      proximo: proximoMes + '-' + String(diaEfectivo_(f.dia, proximoMes)).padStart(2, '0'),
+    };
+  }).sort((a, b) => a.proximo < b.proximo ? -1 : 1);
+
+  const huchas = leer_('Huchas').map(h => {
+    const id = String(h.id);
+    const ahorrado = redondear_(aportes.filter(a => a.hucha === id).reduce((s, a) => s + a.importe, 0));
+    const meta = Number(h.meta) || 0;
+    const creada = new Date(h.creada);
+    const ritmo = ahorrado / Math.max(1, (ahora - creada) / (30.44 * 86400000));
+    let fin = '';
+    if (meta > ahorrado && ritmo > 0) fin = mesMas_(hoy, Math.ceil((meta - ahorrado) / ritmo));
+    return { id, nombre: String(h.nombre), meta, ahorrado, ritmo: redondear_(ritmo), fin };
+  });
+
+  const deudas = leer_('Deudas').map(x => ({
+    id: String(x.id), dia: diaDe_(new Date(x.fecha)), persona: String(x.persona), importe: Number(x.importe) || 0,
+    sentido: x.sentido === 'debo' ? 'debo' : 'me_debe', concepto: String(x.concepto || ''),
+    pagada: x.pagada ? diaDe_(new Date(x.pagada)) : '',
+  })).sort((a, b) => a.dia < b.dia ? 1 : -1);
+
+  const deseos = leer_('Deseos').map(x => ({
+    id: String(x.id), nombre: String(x.nombre), precio: Number(x.precio) || 0, estado: String(x.estado || 'esperando'),
+    horas: Math.floor((ahora - new Date(x.fecha)) / 3600000),
+  })).sort((a, b) => a.horas - b.horas);
+
+  const nombresProyecto = leer_('Proyectos').map(x => String(x.nombre));
+  movs.forEach(x => { if (x.proyecto && nombresProyecto.indexOf(x.proyecto) < 0) nombresProyecto.push(x.proyecto); });
+  const proyectos = nombresProyecto.map(nombre => {
+    const suyos = movs.filter(x => x.proyecto === nombre);
+    const suma = (lista, tipo) => redondear_(lista.filter(x => x.tipo === tipo).reduce((s, x) => s + x.importe, 0));
+    const delMes = suyos.filter(x => mesDe_(x.fecha) === mes);
+    return {
+      nombre, gastos: suma(suyos, 'gasto'), ingresos: suma(suyos, 'ingreso'),
+      gastosMes: suma(delMes, 'gasto'), ingresosMes: suma(delMes, 'ingreso'), movimientos: suyos.length,
+    };
+  });
+
+  return {
+    mes, hoy, hoyDia, dias, diasMes,
+    primerDiaSemana: Number(Utilities.formatDate(new Date(mes + '-01T12:00:00Z'), TZ, 'u')),
+    gastos: r.gastos, ingresos: r.ingresos, ahorradoMes: r.ahorrado, queda: r.queda, anterior: ant.gastos,
+    porTema: r.porTema.sort((a, b) => b.total - a.total),
+    diario: diario.map(redondear_),
+    sinGastar, racha,
+    movs: r.delMes.sort((a, b) => b.fecha - a.fecha).map(x => ({
+      id: x.id, dia: diaDe_(x.fecha), hora: Utilities.formatDate(x.fecha, TZ, 'HH:mm'),
+      importe: x.importe, tipo: x.tipo, tema: x.tema, nota: x.nota, proyecto: x.proyecto, origen: x.origen,
+    })),
+    temas, fijos, huchas, deudas, deseos, proyectos,
+    stats: estadisticas_(mes, movs, ahora),
+    urlHoja: libro_().getUrl(),
+    urlApp: ScriptApp.getService().getUrl(),
+  };
+}
+
+function resumen_(mes, movs, temas, aportes) {
+  const delMes = movs.filter(m => mesDe_(m.fecha) === mes);
+  const gastos = delMes.filter(m => m.tipo === 'gasto');
+  const ingresos = delMes.filter(m => m.tipo === 'ingreso');
+  const porTema = temas.filter(t => t.tipo === 'gasto').map(t => ({ tema: t.tema, presupuesto: t.presupuesto, total: 0 }));
+  gastos.forEach(g => {
+    let t = porTema.find(x => x.tema === g.tema);
+    if (!t) {
+      t = { tema: g.tema, presupuesto: 0, total: 0 };
+      porTema.push(t);
+    }
+    t.total += g.importe;
+  });
+  porTema.forEach(t => { t.total = redondear_(t.total); });
+  const suma = lista => redondear_(lista.reduce((s, m) => s + m.importe, 0));
+  const ahorrado = suma(aportes.filter(a => mesDe_(a.fecha) === mes));
+  const g = suma(gastos);
+  const i = suma(ingresos);
+  return { delMes, gastos: g, ingresos: i, ahorrado, queda: redondear_(i - g - ahorrado), porTema };
+}
+
+function estadisticas_(mes, movs, ahora) {
+  const meses = [];
+  for (let i = 5; i >= 0; i--) {
+    const m = mesMas_(mes, -i);
+    const delMes = movs.filter(x => mesDe_(x.fecha) === m);
+    meses.push({
+      mes: m,
+      gastos: redondear_(delMes.filter(x => x.tipo === 'gasto').reduce((s, x) => s + x.importe, 0)),
+      ingresos: redondear_(delMes.filter(x => x.tipo === 'ingreso').reduce((s, x) => s + x.importe, 0)),
+    });
+  }
+  // Últimos 91 días (13 semanas justas), sin los fijos.
+  const desde = ahora.getTime() - 91 * 86400000;
+  const recientes = movs.filter(x => x.tipo === 'gasto' && x.origen !== 'fijo' && x.fecha.getTime() >= desde);
+  const semana = [0, 0, 0, 0, 0, 0, 0];
+  recientes.forEach(x => { semana[Number(Utilities.formatDate(x.fecha, TZ, 'u')) - 1] += x.importe; });
+  const porNota = {};
+  recientes.forEach(x => {
+    const n = x.nota.trim();
+    if (!n) return;
+    const clave = n.toLowerCase();
+    porNota[clave] = porNota[clave] || { nota: n, veces: 0, total: 0 };
+    porNota[clave].veces++;
+    porNota[clave].total += x.importe;
+  });
+  const top = Object.keys(porNota).map(c => porNota[c])
+    .sort((a, b) => b.total - a.total).slice(0, 5)
+    .map(x => ({ nota: x.nota, veces: x.veces, total: redondear_(x.total) }));
+  return { meses, semana: semana.map(v => redondear_(v / 13)), top };
+}
+
+// Lunes a hoy, comparado con la semana anterior entera.
+function resumenSemana_() {
+  const ahora = new Date();
+  const dow = Number(Utilities.formatDate(ahora, TZ, 'u'));
+  const lunes = diaDe_(new Date(ahora.getTime() - (dow - 1) * 86400000));
+  const lunesAnt = diaDe_(new Date(ahora.getTime() - (dow + 6) * 86400000));
+  const gastos = movimientos_().filter(x => x.tipo === 'gasto');
+  const esta = gastos.filter(x => diaDe_(x.fecha) >= lunes);
+  const anterior = gastos.filter(x => { const d = diaDe_(x.fecha); return d >= lunesAnt && d < lunes; });
+  const total = redondear_(esta.reduce((s, x) => s + x.importe, 0));
+  const totalAnt = redondear_(anterior.reduce((s, x) => s + x.importe, 0));
+  if (!esta.length) return '🌱 Esta semana no has gastado nada. ¡Bien!';
+  const porTema = {};
+  esta.forEach(x => { porTema[x.tema] = (porTema[x.tema] || 0) + x.importe; });
+  const top = Object.keys(porTema).sort((a, b) => porTema[b] - porTema[a])[0];
+  const dif = redondear_(total - totalAnt);
+  let txt = '📊 Esta semana: ' + eur_(total);
+  if (totalAnt > 0) txt += dif > 0 ? ' (' + eur_(dif) + ' más que la anterior)' : dif < 0 ? ' (' + eur_(-dif) + ' menos que la anterior)' : ' (igual que la anterior)';
+  txt += '. Donde más: ' + top + ' ' + eur_(porTema[top]) + '.';
+  const d = datos_(null);
+  txt += ' Mes: ' + eur_(d.gastos) + ' gastado';
+  if (d.ingresos > 0) txt += ', te quedan ' + eur_(d.queda);
+  return txt + '.';
+}
+
+function widget_() {
+  aplicarFijos_();
+  const d = datos_(null);
+  const hoyGasto = d.movs.filter(x => x.tipo === 'gasto' && x.dia === d.hoyDia).reduce((s, x) => s + x.importe, 0);
+  const pasado = d.porTema.find(t => t.presupuesto > 0 && t.total > t.presupuesto);
+  const top = d.porTema[0];
+  const dif = d.anterior > 0 ? Math.round((d.gastos - d.anterior) / d.anterior * 100) : null;
+  return {
+    mes: MESES[Number(d.mes.slice(5)) - 1],
+    gastado: eur_(d.gastos),
+    queda: d.ingresos > 0 ? 'Te quedan ' + eur_(d.queda) : '',
+    hoy: 'Hoy: ' + eur_(redondear_(hoyGasto)),
+    top: top && top.total > 0 ? top.tema + ' ' + eur_(top.total) : '',
+    aviso: pasado ? 'Pasado en ' + pasado.tema : '',
+    url: d.urlApp,
+    // Para los tamaños mediano y grande.
+    dif: dif === null ? '' : (dif > 0 ? '+' : '') + dif + ' % vs ' + MESES[Number(mesMas_(d.mes, -1).slice(5)) - 1].slice(0, 3),
+    diario: d.diario,
+    dias: d.dias,
+    presupuestos: d.porTema.filter(t => t.presupuesto > 0)
+      .map(t => ({ tema: t.tema, total: eur_(t.total), presupuesto: eur_(t.presupuesto), uso: redondear_(t.total / t.presupuesto) }))
+      .sort((a, b) => b.uso - a.uso).slice(0, 4),
+    temas: d.porTema.filter(t => t.total > 0).slice(0, 5).map(t => ({ tema: t.tema, total: eur_(t.total) })),
+    ultimos: d.movs.slice(0, 5).map(m => ({
+      texto: m.nota || m.tema, importe: (m.tipo === 'ingreso' ? '+' : '−') + eur_(m.importe), ingreso: m.tipo === 'ingreso',
+    })),
+  };
+}
+
+function codigoScriptable_(k) {
+  return SCRIPTABLE_.replace('__URL__', ScriptApp.getService().getUrl() + '?k=' + k);
+}
+
+// Código del widget para la app Scriptable del iPhone. Se adapta al tamaño elegido.
+const SCRIPTABLE_ = `// Widget de Gastos para Scriptable. Pega esto en un script nuevo.
+// Funciona en los tres tamaños: pequeño, mediano (ancho) y grande.
+const URL = '__URL__';
+const C = { fondo: '#0c0c0d', lima: '#c8f169', texto: '#f4f4f2', gris: '#9a9aa1', pista: '#26262a', aviso: '#ffc247', mal: '#ff6b5e' };
+const col = c => new Color(c);
+
+let d = null;
+try { d = await new Request(URL + '&accion=widget').loadJSON(); } catch (e) {}
+const tam = config.widgetFamily || 'medium';
+
+const w = new ListWidget();
+w.backgroundColor = col(C.fondo);
+w.url = URL;
+w.setPadding(14, 16, 14, 16);
+w.refreshAfterDate = new Date(Date.now() + 15 * 60000);
+
+function texto(pila, t, color, fuente) {
+  const x = pila.addText(String(t));
+  x.textColor = col(color);
+  x.font = fuente;
+  x.lineLimit = 1;
+  x.minimumScaleFactor = 0.5;
+  return x;
+}
+
+function colorUso(u) { return u > 1 ? C.mal : u >= 0.8 ? C.aviso : C.lima; }
+
+// Una barrita por día del mes; los días que faltan, en gris.
+function barras(valores, hasta, ancho, alto) {
+  const dc = new DrawContext();
+  dc.size = new Size(ancho, alto);
+  dc.opaque = false;
+  dc.respectScreenScale = true;
+  const n = Math.max(1, valores.length);
+  const hueco = 2;
+  const bw = (ancho - hueco * (n - 1)) / n;
+  const max = Math.max(1, ...valores);
+  valores.forEach((v, i) => {
+    const h = i < hasta ? Math.max(2, v / max * alto) : 2;
+    const p = new Path();
+    p.addRoundedRect(new Rect(i * (bw + hueco), alto - h, bw, h), 1.5, 1.5);
+    dc.addPath(p);
+    dc.setFillColor(col(i < hasta ? C.lima : C.pista));
+    dc.fillPath();
+  });
+  return dc.getImage();
+}
+
+function progreso(uso, ancho) {
+  const alto = 5;
+  const dc = new DrawContext();
+  dc.size = new Size(ancho, alto);
+  dc.opaque = false;
+  dc.respectScreenScale = true;
+  let p = new Path();
+  p.addRoundedRect(new Rect(0, 0, ancho, alto), 2.5, 2.5);
+  dc.addPath(p);
+  dc.setFillColor(col(C.pista));
+  dc.fillPath();
+  p = new Path();
+  p.addRoundedRect(new Rect(0, 0, Math.max(alto, Math.min(1, uso) * ancho), alto), 2.5, 2.5);
+  dc.addPath(p);
+  dc.setFillColor(col(colorUso(uso)));
+  dc.fillPath();
+  return dc.getImage();
+}
+
+function imagen(pila, img, ancho, alto) {
+  const x = pila.addImage(img);
+  x.imageSize = new Size(ancho, alto);
+}
+
+function presupuesto(pila, p, ancho) {
+  const f = pila.addStack();
+  f.layoutHorizontally();
+  f.centerAlignContent();
+  texto(f, p.tema, C.texto, Font.mediumSystemFont(11));
+  f.addSpacer();
+  texto(f, p.total + '  ' + Math.round(p.uso * 100) + ' %', colorUso(p.uso), Font.semiboldSystemFont(11));
+  pila.addSpacer(3);
+  imagen(pila, progreso(p.uso, ancho), ancho, 5);
+}
+
+function cabecera(pila, grande) {
+  texto(pila, d.mes.toUpperCase(), C.gris, Font.semiboldSystemFont(11));
+  pila.addSpacer(2);
+  texto(pila, d.gastado, C.lima, Font.boldSystemFont(grande ? 34 : 28));
+  texto(pila, 'gastado' + (d.dif ? ' · ' + d.dif : ''), C.gris, Font.systemFont(11));
+}
+
+function fila(pila, izq, der, colorDer) {
+  const f = pila.addStack();
+  f.layoutHorizontally();
+  texto(f, izq, C.texto, Font.systemFont(12));
+  f.addSpacer();
+  texto(f, der, colorDer || C.texto, Font.semiboldSystemFont(12));
+}
+
+if (!d) {
+  texto(w, 'GASTOS', C.gris, Font.semiboldSystemFont(11));
+  w.addSpacer();
+  texto(w, 'Sin conexión', C.texto, Font.systemFont(13));
+} else if (tam === 'small') {
+  cabecera(w, false);
+  w.addSpacer();
+  if (d.queda) texto(w, d.queda, C.texto, Font.semiboldSystemFont(12));
+  texto(w, d.hoy, C.texto, Font.systemFont(12));
+  if (d.aviso) texto(w, '● ' + d.aviso, C.mal, Font.semiboldSystemFont(11));
+  else if (d.top) texto(w, d.top, C.gris, Font.systemFont(11));
+} else if (tam === 'medium') {
+  const cuerpo = w.addStack();
+  cuerpo.layoutHorizontally();
+  const izq = cuerpo.addStack();
+  izq.layoutVertically();
+  izq.size = new Size(122, 0);
+  cabecera(izq, false);
+  izq.addSpacer();
+  if (d.queda) texto(izq, d.queda, C.texto, Font.semiboldSystemFont(12));
+  texto(izq, d.hoy, C.texto, Font.systemFont(12));
+  cuerpo.addSpacer(14);
+  const der = cuerpo.addStack();
+  der.layoutVertically();
+  imagen(der, barras(d.diario, d.dias, 170, 52), 170, 52);
+  der.addSpacer(10);
+  const ps = d.presupuestos.slice(0, 2);
+  if (ps.length) ps.forEach((p, i) => { if (i) der.addSpacer(7); presupuesto(der, p, 170); });
+  else d.temas.slice(0, 3).forEach(t => fila(der, t.tema, t.total, C.gris));
+  der.addSpacer();
+} else {
+  const cab = w.addStack();
+  cab.layoutHorizontally();
+  cab.bottomAlignContent();
+  const izq = cab.addStack();
+  izq.layoutVertically();
+  cabecera(izq, true);
+  cab.addSpacer();
+  const der = cab.addStack();
+  der.layoutVertically();
+  if (d.queda) texto(der, d.queda, C.texto, Font.semiboldSystemFont(12)).rightAlignText();
+  texto(der, d.hoy, C.gris, Font.systemFont(12)).rightAlignText();
+  w.addSpacer(12);
+  imagen(w, barras(d.diario, d.dias, 306, 52), 306, 52);
+  w.addSpacer(14);
+  const ps = d.presupuestos.slice(0, 3);
+  ps.forEach((p, i) => { if (i) w.addSpacer(8); presupuesto(w, p, 306); });
+  if (ps.length) w.addSpacer(14);
+  texto(w, 'ÚLTIMOS', C.gris, Font.semiboldSystemFont(10));
+  w.addSpacer(5);
+  d.ultimos.slice(0, ps.length ? 3 : 5).forEach(u => { fila(w, u.texto, u.importe, u.ingreso ? C.lima : C.texto); w.addSpacer(4); });
+  w.addSpacer();
+}
+
+Script.setWidget(w);
+if (!config.runsInWidget) {
+  if (tam === 'small') await w.presentSmall();
+  else if (tam === 'large') await w.presentLarge();
+  else await w.presentMedium();
+}
+Script.complete();
+`;
+
+// ---------- Movimientos y fijos ----------
+
+function guardarMov_(d) {
+  const importe = redondear_(numero_(d.importe));
+  if (!(importe > 0)) throw new Error('Importe no válido: ' + d.importe);
+  const temaDado = limpiar_(d.tema);
+  let tipo;
+  if (String(d.tipo || '').trim()) {
+    tipo = /^\s*ingr/i.test(String(d.tipo)) ? 'ingreso' : 'gasto';
+  } else {
+    // Sin tipo: si el tema solo existe como ingreso (Sueldo, Bizum…), es un ingreso.
+    const coinciden = temas_().filter(t => t.tema === temaDado);
+    tipo = coinciden.length && coinciden.every(t => t.tipo === 'ingreso') ? 'ingreso' : 'gasto';
+  }
+  const tema = temaDado || (tipo === 'ingreso' ? 'Otros ingresos' : 'Otros');
+  const fecha = /^\d{4}-\d{2}-\d{2}$/.test(d.fecha || '') ? new Date(d.fecha + 'T12:00:00Z') : new Date();
+  anadir_('Gastos', {
+    id: nuevoId_('g'), fecha, importe, tema, nota: d.nota, tipo, proyecto: d.proyecto, origen: d.origen || '',
+  });
+
+  const r = resumen_(mesDe_(fecha), movimientos_(), temas_(), aportes_());
+  if (tipo === 'ingreso') {
+    return '✅ +' + eur_(importe) + ' de ' + tema + '. Este mes han entrado ' + eur_(r.ingresos) + ' · te quedan ' + eur_(r.queda) + '.';
+  }
+  const t = r.porTema.find(x => x.tema === tema);
+  const total = ' · total del mes ' + eur_(r.gastos) + '.';
+  let msg = eur_(importe) + ' en ' + tema + '. ';
+  if (!(t.presupuesto > 0)) return '✅ ' + msg + 'Este mes llevas ' + eur_(t.total) + ' en ' + tema + total;
+  const uso = t.total / t.presupuesto;
+  const cuenta = ' (' + eur_(t.total) + ' de ' + eur_(t.presupuesto) + ')';
+  if (uso > 1) return '🔴 ' + msg + 'Te has pasado ' + eur_(t.total - t.presupuesto) + ' del presupuesto' + cuenta + total;
+  if (uso >= 0.8) return '🟡 ' + msg + 'Llevas el ' + Math.round(uso * 100) + ' % del presupuesto' + cuenta + total;
+  return '✅ ' + msg + 'Llevas ' + eur_(t.total) + ' de ' + eur_(t.presupuesto) + total;
+}
+
+// Apunta los fijos cuyo día de cobro de este mes ya ha llegado. No recupera meses atrasados.
+function aplicarFijos_() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return;
+  try {
+    const ahora = new Date();
+    const mes = mesDe_(ahora);
+    const hoy = Number(diaDe_(ahora).slice(8));
+    fijos_().forEach(f => {
+      if (String(f.ultimo) === 'm' + mes) return;
+      const dia = diaEfectivo_(f.dia, mes);
+      if (hoy < dia) return;
+      anadir_('Gastos', {
+        id: nuevoId_('g'), fecha: new Date(mes + '-' + String(dia).padStart(2, '0') + 'T12:00:00Z'),
+        importe: f.importe, tema: f.tema, nota: f.nombre, tipo: 'gasto', proyecto: f.proyecto, origen: 'fijo',
+      });
+      actualizar_('Fijos', f._fila, { ultimo: 'm' + mes });
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ---------- Lectura ----------
+
+function movimientos_() {
+  return leer_('Gastos').map(r => ({
+    id: String(r.id),
+    fecha: new Date(r.fecha),
+    importe: Number(r.importe) || 0,
+    tema: String(r.tema),
+    nota: String(r.nota == null ? '' : r.nota),
+    tipo: tipoDe_(r.tipo),
+    proyecto: String(r.proyecto == null ? '' : r.proyecto),
+    origen: String(r.origen == null ? '' : r.origen),
+  }));
+}
+
+function temas_() {
+  return leer_('Temas').map(r => ({ tema: String(r.tema), presupuesto: Number(r.presupuesto) || 0, tipo: tipoDe_(r.tipo) }));
+}
+
+function aportes_() {
+  return leer_('Aportes').map(r => ({ id: String(r.id), fecha: new Date(r.fecha), hucha: String(r.hucha), importe: Number(r.importe) || 0 }));
+}
+
+function fijos_() {
+  return leer_('Fijos').map(r => ({
+    _fila: r._fila, id: String(r.id), nombre: String(r.nombre), importe: Number(r.importe) || 0, tema: String(r.tema),
+    dia: Number(r.dia) || 1, ultimo: String(r.ultimo || ''), proyecto: String(r.proyecto == null ? '' : r.proyecto),
+  }));
+}
+
+// ---------- Hoja ----------
+
+let LIBRO_ = null;
+
+function libro_() {
+  if (!LIBRO_) {
+    const id = PropertiesService.getScriptProperties().getProperty('HOJA');
+    if (!id) throw new Error('Falta ejecutar configurar()');
+    LIBRO_ = SpreadsheetApp.openById(id);
+  }
+  return LIBRO_;
+}
+
+function hoja_(nombre) {
+  const h = libro_().getSheetByName(nombre);
+  if (!h) throw new Error('Falta la pestaña ' + nombre + ': ejecuta configurar()');
+  return h;
+}
+
+function cabecera_(h) {
+  return h.getRange(1, 1, 1, h.getLastColumn()).getValues()[0].map(String);
+}
+
+// Filas como objetos { columna: valor, _fila }. Se saltan las que tienen vacía la primera columna.
+function leer_(nombre) {
+  const v = hoja_(nombre).getDataRange().getValues();
+  const cab = v[0].map(String);
+  const out = [];
+  for (let i = 1; i < v.length; i++) {
+    if (v[i][0] === '' || v[i][0] == null) continue;
+    const o = { _fila: i + 1 };
+    cab.forEach((c, j) => { o[c] = v[i][j]; });
+    out.push(o);
+  }
+  return out;
+}
+
+function anadir_(nombre, obj) {
+  const h = hoja_(nombre);
+  h.appendRow(cabecera_(h).map(c => celda_(obj[c])));
+}
+
+function actualizar_(nombre, fila, cambios) {
+  const h = hoja_(nombre);
+  const cab = cabecera_(h);
+  Object.keys(cambios).forEach(c => {
+    const j = cab.indexOf(c);
+    if (j >= 0) h.getRange(fila, j + 1).setValue(celda_(cambios[c]));
+  });
+}
+
+// Borra de abajo arriba para que los números de fila no se desplacen.
+function borrarDonde_(nombre, cumple) {
+  const h = hoja_(nombre);
+  leer_(nombre).filter(cumple).map(r => r._fila).sort((a, b) => b - a).forEach(f => h.deleteRow(f));
+}
+
+// ---------- Utilidades ----------
+
+function claveValida_(k) {
+  return !!k && k === PropertiesService.getScriptProperties().getProperty('CLAVE');
+}
+
+function comprobar_(k) {
+  if (!claveValida_(k)) throw new Error('Clave incorrecta');
+}
+
+function texto_(s) {
+  return ContentService.createTextOutput(s).setMimeType(ContentService.MimeType.TEXT);
+}
+
+function json_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function numero_(x) {
+  return Number(String(x).trim().replace(/\s|€/g, '').replace(',', '.'));
+}
+
+function tipoDe_(t) {
+  return t === 'ingreso' ? 'ingreso' : 'gasto';
+}
+
+// Texto que entra en la hoja: sin espacios sobrantes y sin convertirse en fórmula ("=algo").
+function limpiar_(s) {
+  s = String(s == null ? '' : s).trim();
+  return /^[=+\-@]/.test(s) ? "'" + s : s;
+}
+
+function celda_(v) {
+  if (v == null) return '';
+  return typeof v === 'string' ? limpiar_(v) : v;
+}
+
+function nuevoId_(letra) {
+  return letra + Utilities.getUuid().slice(0, 8);
+}
+
+function redondear_(n) {
+  return Math.round(n * 100) / 100;
+}
+
+function eur_(n) {
+  const s = Math.abs(n).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' €';
+  return n < 0 ? '−' + s : s;
+}
+
+function mesDe_(fecha) {
+  return Utilities.formatDate(fecha, TZ, 'yyyy-MM');
+}
+
+function diaDe_(fecha) {
+  return Utilities.formatDate(fecha, TZ, 'yyyy-MM-dd');
+}
+
+function mesMas_(mes, n) {
+  const [y, m] = mes.split('-').map(Number);
+  const total = y * 12 + (m - 1) + n;
+  return Math.floor(total / 12) + '-' + String(total % 12 + 1).padStart(2, '0');
+}
+
+function diasDelMes_(mes) {
+  const [y, m] = mes.split('-').map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+// Un fijo del día 31 se cobra el último día de los meses cortos.
+function diaEfectivo_(dia, mes) {
+  return Math.min(Number(dia) || 1, diasDelMes_(mes));
+}

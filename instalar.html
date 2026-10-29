@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instalar Lima</title>
+<link rel="icon" type="image/png" href="icono-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root { color-scheme: dark; --bg: #0c0c0d; --card: #161618; --line: #2f2f34; --text: #f4f4f2; --muted: #9a9aa1; --lima: #c8f169; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.5 'Space Grotesk', system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 20px 80px; }
+  .logo { width: 72px; height: 72px; border-radius: 18px; background: var(--lima); color: var(--bg); font: 700 46px/72px 'Space Grotesk', sans-serif; text-align: center; }
+  h1 { font-size: 40px; letter-spacing: -.02em; margin: 18px 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  ol { list-style: none; padding: 0; margin: 0; counter-reset: paso; display: flex; flex-direction: column; gap: 12px; }
+  li { counter-increment: paso; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px 20px 18px 66px; position: relative; }
+  li::before { content: counter(paso); position: absolute; left: 18px; top: 16px; width: 32px; height: 32px; border-radius: 10px; background: var(--lima); color: var(--bg); font-weight: 700; text-align: center; line-height: 32px; }
+  .ca { color: var(--muted); font-style: italic; display: block; margin-top: 4px; font-size: 15px; }
+  b { color: var(--text); }
+  code { background: #26262a; padding: 1px 6px; border-radius: 6px; font-size: 15px; }
+  button { margin-top: 12px; border: 0; border-radius: 12px; background: var(--lima); color: var(--bg); font: 700 16px 'Space Grotesk', sans-serif; padding: 12px 18px; cursor: pointer; }
+  button.hecho { background: var(--text); }
+  .aviso { margin-top: 28px; padding: 16px 20px; border-radius: 16px; border: 1px solid var(--line); color: var(--muted); font-size: 15px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="logo">€</div>
+  <h1>Instalar Lima</h1>
+  <p class="sub">Parte 1 · en el ordenador (5 min) — <i>Part 1 · a l'ordinador (5 min)</i></p>
+  <ol>
+    <li>Entra en <a href="https://script.google.com" target="_blank" style="color:var(--lima)">script.google.com</a> con tu cuenta de Google y pulsa <b>Nuevo proyecto</b>. Llámalo <b>Lima</b>.
+      <span class="ca">Entra a script.google.com amb el teu compte de Google, prem «Nuevo proyecto» i posa-li Lima de nom.</span></li>
+    <li>Copia el código del servidor y pégalo en <code>Código.gs</code>, sustituyendo todo lo que haya (Ctrl+A y Ctrl+V).
+      <span class="ca">Copia el codi del servidor i enganxa'l a Código.gs, substituint tot el que hi hagi (Ctrl+A i Ctrl+V).</span>
+      <button type="button" data-archivo="servidor/codigo.txt">Copiar Código.gs</button></li>
+    <li>Pulsa <b>+</b> junto a «Archivos» → <b>HTML</b>, llámalo <code>Panel</code> y pega este segundo código.
+      <span class="ca">Prem + al costat de «Archivos» → HTML, posa-li Panel i enganxa aquest segon codi.</span>
+      <button type="button" data-archivo="servidor/panel.txt">Copiar Panel</button></li>
+    <li>Guarda (Ctrl+S). Arriba elige la función <b>configurar</b> y pulsa <b>Ejecutar</b>. Acepta los permisos (Configuración avanzada → Ir a Lima → Permitir). Abajo sale tu <b>Clave</b>: cópiala.
+      <span class="ca">Desa (Ctrl+S). A dalt tria la funció configurar i prem «Ejecutar». Accepta els permisos. A baix surt la teva Clave: copia-la.</span></li>
+    <li><b>Implementar → Nueva implementación →</b> rueda dentada → <b>Aplicación web</b>. Ejecutar como: <b>Yo</b>. Quién tiene acceso: <b>Cualquier usuario</b>. Pulsa <b>Implementar</b>.
+      <span class="ca">«Implementar → Nueva implementación» → roda dentada → «Aplicación web». Executa com: jo. Accés: qualsevol usuari. Prem «Implementar».</span></li>
+    <li>Pulsa el enlace de la <b>URL de la aplicación web</b>, pega tu clave y sigue los pasos: verás un <b>código QR</b> para el iPhone y te llegará un correo con tus enlaces.
+      <span class="ca">Prem l'enllaç de la URL de l'aplicació web, enganxa la clau i segueix els passos: veuràs un codi QR per a l'iPhone i et vindrà un correu amb els teus enllaços.</span></li>
+  </ol>
+  <div class="aviso">Tus gastos se guardan en una hoja de <b>tu</b> Google Drive. Nadie más los ve. · <i>Les teves despeses es guarden en un full del teu Google Drive. Ningú més les veu.</i></div>
+</main>
+<script>
+  document.querySelectorAll('[data-archivo]').forEach(b => {
+    b.addEventListener('click', async () => {
+      const texto = b.textContent;
+      try {
+        const r = await fetch(b.dataset.archivo, { cache: 'no-store' });
+        await navigator.clipboard.writeText(await r.text());
+        b.textContent = '¡Copiado! Ahora pégalo · Copiat!';
+        b.classList.add('hecho');
+      } catch (e) {
+        b.textContent = 'No se pudo copiar, prueba otra vez';
+      }
+      setTimeout(() => { b.textContent = texto; b.classList.remove('hecho'); }, 3500);
+    });
+  });
+</script>
+</body>
+</html>

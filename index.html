@@ -256,8 +256,9 @@
 <div class="aviso" id="aviso" role="status"></div>
 
 <script>
-  // Dirección del servidor de Google: la usa la web propia (en GitHub) para leer y guardar.
-  const API = 'https://script.google.com/macros/s/AKfycbxyNohrZ8It8cPh2XLZ9dTTq7b6SmfoVIYS073xTVMbgW-jPLy_63Un6jDv-E2A0ikD/exec';
+  // Servidor de Google con el que habla la web propia (en GitHub). Cada persona tiene el suyo:
+  // llega como ?api=ID la primera vez y se recuerda; sin él, el de Toon.
+  const API = leerApi();
   const EN_GOOGLE = !!(window.google && google.script && google.script.run);
   const K = leerClave();
   const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -298,6 +299,17 @@
   if (!TABS.some(t => t[0] === vista) && !SUB[vista]) vista = 'inicio';
 
   // ---------- Servidor ----------
+
+  function leerApi() {
+    const q = new URLSearchParams(location.search).get('api');
+    let id = q && /^[\w-]{20,}$/.test(q) ? q : '';
+    if (id) {
+      try { localStorage.setItem('gastos.api', id); } catch (e) {}
+    } else {
+      try { id = localStorage.getItem('gastos.api') || ''; } catch (e) {}
+    }
+    return 'https://script.google.com/macros/s/' + (id || 'AKfycbxyNohrZ8It8cPh2XLZ9dTTq7b6SmfoVIYS073xTVMbgW-jPLy_63Un6jDv-E2A0ikD') + '/exec';
+  }
 
   // Dentro de Google la clave llega en la página; en la web propia, por ?k= la primera vez y luego se recuerda.
   function leerClave() {
@@ -782,6 +794,10 @@
       const base = D.urlApp + '?k=' + encodeURIComponent(K);
       const copiable = txt => `<input class="campo" readonly value="${esc(txt)}" data-copiar style="font-size:12px;margin-top:8px" aria-label="Dirección para copiar">`;
       return `<div class="pila">
+        <div class="tile"><b>Dirección para tus atajos</b>
+          <div class="sub" style="margin-top:6px;line-height:1.5">Pégala en la primera acción de los atajos Gasto e Ingreso. No la compartas: lleva tu clave.</div>
+          ${copiable(base)}
+          <button type="button" class="boton peq" style="margin-top:10px" data-act="copiarAtajos" data-texto="${esc(base)}">Copiar dirección</button></div>
         <div class="tile"><b>Resumen del domingo</b>
           <div class="sub" style="margin-top:6px;line-height:1.5">En Dreceres → Automatització → Nova automatització → Hora del dia: diumenge 21:00 → Executa immediatament. Acciones: <b>Obtén el contingut de l'URL</b> con esta dirección y <b>Mostra una notificació</b> con el resultado.</div>
           ${copiable(base + '&accion=resumen')}</div>
@@ -890,6 +906,16 @@
     if (t.hasAttribute('data-copiar')) { t.select(); return; }
     const act = t.dataset.act;
     if (act === 'filtro') { filtroMovs = t.value; return pintar(); }
+    if (act === 'copiarAtajos') {
+      try {
+        await navigator.clipboard.writeText(t.dataset.texto);
+        return avisar('Copiada. Ahora pégala en el atajo');
+      } catch (err) {
+        const i = t.parentElement.querySelector('[data-copiar]');
+        i.select();
+        return avisar('Mantén pulsado el texto seleccionado y pulsa Copiar');
+      }
+    }
     if (act === 'verDia') return avisar(`${t.dataset.dia} de ${nombreMes(mes)}: ${eur(Number(t.dataset.v))}`);
     // Borrar pide un segundo toque para confirmar.
     if (t.hasAttribute('data-peligro') && !t.classList.contains('seguro')) {
