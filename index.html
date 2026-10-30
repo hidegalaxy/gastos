@@ -4,12 +4,12 @@
 <base target="_top">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Gastos</title>
+<title>Lima</title>
 <!-- Para la web propia: icono y pantalla completa al añadirla a la pantalla de inicio. -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Gastos">
+<meta name="apple-mobile-web-app-title" content="Lima">
 <meta name="theme-color" content="#0c0c0d">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icono-192.png">
@@ -226,7 +226,7 @@
 <body data-k="<?= clave ?>">
 <div class="splash" id="splash" role="status" aria-label="Cargando">
   <div class="logo" aria-hidden="true">€</div>
-  <div class="nombre">Gastos</div>
+  <div class="nombre">Lima</div>
   <div class="eq" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
   <div class="frase" id="frase">Contando monedas…</div>
 </div>
@@ -235,7 +235,7 @@
 <main>
   <header class="cab">
     <button class="redondo" id="atras" aria-label="Volver" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
-    <h1 id="titulo">Gastos</h1>
+    <h1 id="titulo">Lima</h1>
     <div class="mesnav" id="mesnav">
       <button class="redondo" id="antes" aria-label="Mes anterior"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
       <button class="redondo" id="despues" aria-label="Mes siguiente"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg></button>
@@ -347,7 +347,7 @@
 
   function pantallaClave(error) {
     $('mesnav').hidden = true;
-    $('titulo').textContent = 'Gastos';
+    $('titulo').textContent = 'Lima';
     $('vista').innerHTML = `<form class="tile pila" id="formClave" autocomplete="off">
         <div class="et">${error ? esc(error) + '. ' : ''}Escribe tu clave para entrar (solo la primera vez).</div>
         <input class="campo" name="clave" placeholder="Clave" autocapitalize="off" autocorrect="off" spellcheck="false">
@@ -802,7 +802,7 @@
           <div class="sub" style="margin-top:6px;line-height:1.5">En Dreceres → Automatització → Nova automatització → Hora del dia: diumenge 21:00 → Executa immediatament. Acciones: <b>Obtén el contingut de l'URL</b> con esta dirección y <b>Mostra una notificació</b> con el resultado.</div>
           ${copiable(base + '&accion=resumen')}</div>
         <div class="tile"><b>Widget con lo gastado</b>
-          <div class="sub" style="margin-top:6px;line-height:1.5">Instala la app gratis <b>Scriptable</b>. Abre este enlace en el iPhone, copia todo el texto, pégalo en un script nuevo de Scriptable y llámalo Gastos. Luego añade un widget de Scriptable a la pantalla de inicio y elige ese script.</div>
+          <div class="sub" style="margin-top:6px;line-height:1.5">Instala la app gratis <b>Scriptable</b>. Abre este enlace en el iPhone, copia todo el texto, pégalo en un script nuevo de Scriptable y llámalo Lima. Luego añade un widget de Scriptable a la pantalla de inicio y elige ese script.</div>
           <a class="boton peq sec" style="display:inline-flex;align-items:center;margin-top:10px;text-decoration:none" href="${esc(base + '&accion=scriptable')}" target="_blank">Abrir el código del widget</a></div>
         <div class="tile"><b>Atajo "Ingreso"</b>
           <div class="sub" style="margin-top:6px;line-height:1.5">Duplica el atajo Gasto y llámalo Ingreso. Cambia la lista por: ${D.temas.filter(t => t.tipo === 'ingreso').map(t => esc(t.tema)).join(', ')}. En el JSON añade un campo de texto <b>tipo</b> con el valor <b>ingreso</b>.</div></div>

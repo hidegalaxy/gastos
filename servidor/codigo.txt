@@ -1,5 +1,5 @@
 /**
- * Gastos: backend del atajo del iPhone y del panel.
+ * Lima: backend del atajo del iPhone y del panel.
  *
  * Una vez: pega este archivo y Panel.html en un proyecto de script.google.com,
  * ejecuta configurar() y publícalo como aplicación web
@@ -39,7 +39,7 @@ function configurar() {
     }
   }
   if (!props.getProperty('HOJA')) {
-    const nuevo = SpreadsheetApp.create('Gastos');
+    const nuevo = SpreadsheetApp.create('Lima');
     nuevo.setSpreadsheetTimeZone(TZ);
     nuevo.setSpreadsheetLocale('es_ES');
     nuevo.getSheets()[0].setName('Gastos');
@@ -121,7 +121,7 @@ function doGet(e) {
   const t = HtmlService.createTemplateFromFile('Panel');
   t.clave = p.k;
   return t.evaluate()
-    .setTitle('Gastos')
+    .setTitle('Lima')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
 }
 
@@ -553,7 +553,7 @@ function codigoScriptable_(k) {
 }
 
 // Código del widget para la app Scriptable del iPhone. Se adapta al tamaño elegido.
-const SCRIPTABLE_ = `// Widget de Gastos para Scriptable. Pega esto en un script nuevo.
+const SCRIPTABLE_ = `// Widget de Lima para Scriptable. Pega esto en un script nuevo.
 // Funciona en los tres tamaños: pequeño, mediano (ancho) y grande.
 const URL = '__URL__';
 const C = { fondo: '#0c0c0d', lima: '#c8f169', texto: '#f4f4f2', gris: '#9a9aa1', pista: '#26262a', aviso: '#ffc247', mal: '#ff6b5e' };
@@ -652,7 +652,7 @@ function fila(pila, izq, der, colorDer) {
 }
 
 if (!d) {
-  texto(w, 'GASTOS', C.gris, Font.semiboldSystemFont(11));
+  texto(w, 'LIMA', C.gris, Font.semiboldSystemFont(11));
   w.addSpacer();
   texto(w, 'Sin conexión', C.texto, Font.systemFont(13));
 } else if (tam === 'small') {
