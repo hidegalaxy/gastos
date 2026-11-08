@@ -22,7 +22,8 @@ const ESQUEMA = {
   Proyectos: ['nombre'],
   // La foto vive en Drive; aquí queda el enlace y una miniatura pequeña para la galería.
   // Un ticket sin gasto con su id está «por leer»; reparto guarda con quién se paga hasta entonces.
-  Tickets: ['mov', 'archivo', 'url', 'mini', 'fecha', 'reparto', 'estado'],
+  // articulos: lo que Claude lee del ticket; asignacion: para quién es cada uno, en el mismo orden.
+  Tickets: ['mov', 'archivo', 'url', 'mini', 'fecha', 'reparto', 'estado', 'articulos', 'asignacion'],
 };
 const TEMAS_GASTO = ['Súper', 'Comida fuera', 'Transporte', 'Ocio', 'Suscripciones', 'Compras', 'Estudios', 'Otros'];
 const TEMAS_INGRESO = ['Sueldo', 'Bizum', 'Ventas', 'Regalos', 'Otros ingresos'];
@@ -302,6 +303,7 @@ const ACCIONES_ = {
     const r = calcularReparto_(total, d.amigos, d.pago);
     borrarDonde_('Deudas', x => String(x.mov) === d.id);
     actualizar_('Gastos', fila._fila, { importe: r ? r.miParte : total, total: r ? r.total : '', reparto: r ? r.con : '', pago: r ? r.pago : '' });
+    guardarAsignacion_(d.id, r && Array.isArray(d.asignacion) ? d.asignacion : null);
     if (!r) return 'Ahora lo pagas tú todo';
     apuntarDeudas_(r, d.id, String(fila.nota || fila.tema));
     return 'Tu parte: ' + eur_(r.miParte) + '. ' + textoDeudas_(r);
@@ -336,6 +338,7 @@ const ACCIONES_ = {
       apuntarDeudas_(r, d.id, cambios.nota || cambios.tema);
       cambios.importe = r.miParte;
       cambios.total = r.total;
+      guardarAsignacion_(d.id, null);
     }
     actualizar_('Gastos', fila._fila, cambios);
     return 'Gasto corregido';
@@ -366,7 +369,21 @@ const ACCIONES_ = {
     const fecha = String(d.fecha || '');
     const fechaBuena = /^\d{4}-\d{2}-\d{2}$/.test(fecha) && !isNaN(new Date(fecha + 'T12:00:00Z')) && fecha <= hoy && fecha >= mesMas_(hoy.slice(0, 7), -24);
     const tema = temas_().some(x => x.tipo === 'gasto' && x.tema === d.tema) ? d.tema : '';
-    return apuntarTicket_(t, { importe, tema, nota: String(d.comercio || '').trim().slice(0, 60), fecha: fechaBuena ? fecha : '' }, 'claude');
+    return apuntarTicket_(t, { importe, tema, nota: String(d.comercio || '').trim().slice(0, 60), fecha: fechaBuena ? fecha : '', articulos: limpiarArticulos_(d.articulos) }, 'claude');
+  },
+  // Para repartir por artículos un ticket que se apuntó sin leerlos.
+  pedirArticulos: d => {
+    const t = leer_('Tickets').find(x => String(x.mov) === d.id);
+    if (!t) throw new Error('Este gasto no tiene ticket');
+    actualizar_('Tickets', t._fila, { estado: 'articulos' });
+    return 'Leeré los artículos cuando tu PC esté encendido';
+  },
+  articulosTicket: d => {
+    const t = leer_('Tickets').find(x => String(x.mov) === d.id);
+    if (!t) return 'Ese ticket ya no está';
+    const articulos = limpiarArticulos_(d.articulos);
+    actualizar_('Tickets', t._fila, { articulos: articulos.length ? JSON.stringify(articulos) : '', estado: articulos.length ? '' : 'sin_articulos' });
+    return articulos.length + ' artículos leídos';
   },
   completarTicket: d => {
     const t = leer_('Tickets').find(x => String(x.mov) === d.id);
@@ -505,6 +522,7 @@ function datos_(mes) {
       importe: x.importe, tipo: x.tipo, tema: x.tema, nota: x.nota, proyecto: x.proyecto, origen: x.origen,
       total: x.total, reparto: x.reparto, pago: x.pago,
       ticket: !!t, mini: t ? String(t.mini || '') : '', urlTicket: t ? String(t.url || '') : '',
+      articulos: t ? listaGuardada_(t.articulos) : [], asignacion: t ? listaGuardada_(t.asignacion) : [], estadoTicket: t ? String(t.estado || '') : '',
     };
   };
   const r = resumen_(mes, movs, temas, aportes);
@@ -999,6 +1017,29 @@ function guardarTicket_(mov, foto, mini, nombre, extra) {
   anadir_('Tickets', Object.assign({ mov, archivo: archivo.getId(), url: archivo.getUrl(), mini: miniBuena ? mini : '', fecha: new Date() }, extra || {}));
 }
 
+function listaGuardada_(texto) {
+  try {
+    const l = JSON.parse(String(texto || ''));
+    return Array.isArray(l) ? l : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+// Lo leído de una foto: se queda solo lo que parece un artículo con su precio.
+function limpiarArticulos_(lista) {
+  return (Array.isArray(lista) ? lista : [])
+    .map(a => ({ nombre: String(a && a.nombre || '').trim().slice(0, 40), importe: redondear_(Number(a && a.importe)) }))
+    .filter(a => a.nombre && a.importe > 0 && a.importe < 100000)
+    .slice(0, 60);
+}
+
+function guardarAsignacion_(mov, asignacion) {
+  if (!libro_().getSheetByName('Tickets')) return;
+  const t = leer_('Tickets').find(x => String(x.mov) === String(mov));
+  if (t) actualizar_('Tickets', t._fila, { asignacion: asignacion ? JSON.stringify(asignacion) : '' });
+}
+
 function repartoGuardado_(t) {
   try {
     const r = JSON.parse(String(t.reparto || ''));
@@ -1021,7 +1062,7 @@ function apuntarTicket_(t, d, origen) {
     apuntarDeudas_(r, id, d.nota || d.tema || 'Ticket');
     msg += ' ' + textoDeudas_(r);
   }
-  actualizar_('Tickets', t._fila, { reparto: '', estado: '' });
+  actualizar_('Tickets', t._fila, { reparto: '', estado: '', articulos: d.articulos && d.articulos.length ? JSON.stringify(d.articulos) : '' });
   try {
     if (d.nota) DriveApp.getFileById(String(t.archivo)).setName(fecha + ' ' + String(d.nota).replace(/[\\/:*?"<>|']/g, ' ').slice(0, 60) + '.jpg');
   } catch (err) {}
@@ -1032,7 +1073,11 @@ function apuntarTicket_(t, d, origen) {
 function pendientesPc_() {
   PropertiesService.getScriptProperties().setProperty('PC_VISTO', new Date().toISOString());
   const d = datos_(null);
-  return { hoy: d.hoyDia, temas: d.temas.filter(t => t.tipo === 'gasto').map(t => t.tema), pendientes: d.pendientes.filter(p => !p.estado).map(p => ({ id: p.id, dia: p.dia })) };
+  return {
+    hoy: d.hoyDia, temas: d.temas.filter(t => t.tipo === 'gasto').map(t => t.tema),
+    pendientes: d.pendientes.filter(p => !p.estado).map(p => ({ id: p.id, dia: p.dia })),
+    articulos: leer_('Tickets').filter(t => String(t.estado) === 'articulos').map(t => ({ id: String(t.mov) })),
+  };
 }
 
 // La foto va a la papelera de Drive, de donde aún se puede recuperar durante 30 días.

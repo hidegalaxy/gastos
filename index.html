@@ -154,6 +154,12 @@
   .fotoBtn.puesta { border-color: var(--accent); color: var(--accent); }
   .segQuien span { white-space: nowrap; padding-left: 4px; padding-right: 4px; }
   .resumenRep { background: var(--bg); border: 1px solid var(--line2); border-radius: 14px; padding: 10px 12px; font-size: 13px; line-height: 1.6; }
+  .artFila { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .artFila:first-child { border-top: 0; padding-top: 0; }
+  .artCab { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+  .artCab span { min-width: 0; overflow-wrap: anywhere; }
+  .artCab b { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+  .artFila .chips span { height: 32px; padding: 0 11px; }
   .parteFila { display: flex; align-items: center; gap: 8px; }
   .parteFila span { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .parteFila input { flex: 0 0 104px; width: 104px; text-align: right; }
@@ -572,7 +578,8 @@
   const chipAmigo = (nombre, marcado) => `<label><input type="checkbox" data-amigo value="${esc(nombre)}" ${marcado ? 'checked' : ''}><span>${esc(nombre)}</span></label>`;
 
   // total: fijo al repartir un gasto ya apuntado; si no, se lee del campo importe.
-  function bloqueReparto(total, marcados = [], sinTotal = false) {
+  // opciones: sinTotal (aún sin leer), articulos (los del ticket), modo (el que sale marcado), pie (HTML bajo el modo).
+  function bloqueReparto(total, marcados = [], { sinTotal = false, articulos = [], modo = 'igual', pie = '' } = {}) {
     const nombres = D.amigos.slice();
     marcados.forEach(n => { if (!nombres.includes(n)) nombres.unshift(n); });
     return `<div class="pila" data-reparto ${total ? `data-total="${total}"` : ''} ${sinTotal ? 'data-sin-total="1"' : ''} ${marcados.length ? '' : 'hidden'}>
@@ -583,11 +590,14 @@
         <button type="button" class="boton peq sec" data-act="anadirAmigo">Añadir</button>
       </div>
       <div class="pila" data-detalle hidden>
-        <div class="seg" role="radiogroup" aria-label="Cómo se reparte" ${sinTotal ? 'hidden' : ''}>
-          <label><input type="radio" name="modo" value="igual" checked><span>A partes iguales</span></label>
-          <label><input type="radio" name="modo" value="mano"><span>A mano</span></label>
+        <div class="seg segQuien" role="radiogroup" aria-label="Cómo se reparte" ${sinTotal ? 'hidden' : ''}>
+          <label><input type="radio" name="modo" value="igual" ${modo === 'igual' ? 'checked' : ''}><span>${articulos.length ? 'Iguales' : 'A partes iguales'}</span></label>
+          <label><input type="radio" name="modo" value="mano" ${modo === 'mano' ? 'checked' : ''}><span>A mano</span></label>
+          ${articulos.length ? `<label><input type="radio" name="modo" value="articulos" ${modo === 'articulos' ? 'checked' : ''}><span>Por artículos</span></label>` : ''}
         </div>
+        ${pie}
         <div class="pila" data-partes hidden></div>
+        <div data-articulos hidden></div>
         <div class="etq">¿Quién ha pagado el ticket?</div>
         <div class="chips" data-pago></div>
         <div class="resumenRep" data-resumen></div>
@@ -615,9 +625,21 @@
       cajaPago.innerHTML = chip('pago', '', 'Yo', !sigue) + nombres.map(n => chip('pago', n, n, n === sigue)).join('');
       cajaPago.dataset.n = clave;
     }
-    const aMano = form.querySelector('[name=modo]:checked').value === 'mano';
+    const modo = form.querySelector('[name=modo]:checked').value;
+    const aMano = modo === 'mano';
     const cajaPartes = b.querySelector('[data-partes]');
     cajaPartes.hidden = !aMano;
+    const cajaArt = b.querySelector('[data-articulos]');
+    cajaArt.hidden = modo !== 'articulos';
+    if (modo === 'articulos' && cajaArt.dataset.n !== clave) {
+      // Con otros amigos marcados se vuelve a dibujar, sin perder lo que ya estaba asignado.
+      const antes = cajaArt.dataset.n === undefined ? (b._asignacion || []) : leerAsignacion(cajaArt, b._articulos);
+      cajaArt.innerHTML = b._articulos.map((a, i) => `<div class="artFila">
+          <div class="artCab"><span>${esc(a.nombre)}</span><b>${eur(a.importe)}</b></div>
+          <div class="chips">${[['', 'Yo']].concat(nombres.map(n => [n, n])).map(([valor, texto]) => `<label><input type="checkbox" data-art="${i}" value="${esc(valor)}" ${(antes[i] || []).includes(valor) ? 'checked' : ''}><span>${esc(texto)}</span></label>`).join('')}</div>
+        </div>`).join('');
+      cajaArt.dataset.n = clave;
+    }
 
     const total = redondear(b.dataset.total ? Number(b.dataset.total) : numeroDe((form.querySelector('[name=importe]') || {}).value));
     const igual = total > 0 ? redondear(total / (nombres.length + 1)) : 0;
@@ -634,19 +656,47 @@
     const resumen = b.querySelector('[data-resumen]');
     if (b.dataset.sinTotal) { resumen.textContent = 'Cuando lea el ticket, se repartirá a partes iguales.'; return; }
     if (!(total > 0)) { resumen.textContent = 'Escribe el importe para ver cuánto le toca a cada uno.'; return; }
-    const partes = nombres.map(persona => {
-      const i = aMano ? [...cajaPartes.querySelectorAll('[data-parte]')].find(x => x.dataset.parte === persona) : null;
-      return { persona, importe: i && i.value.trim() ? redondear(numeroDe(i.value)) : igual };
-    });
+    const partes = modo === 'articulos'
+      ? partesPorArticulos(total, b._articulos, leerAsignacion(cajaArt, b._articulos), nombres)
+      : nombres.map(persona => {
+        const i = aMano ? [...cajaPartes.querySelectorAll('[data-parte]')].find(x => x.dataset.parte === persona) : null;
+        return { persona, importe: i && i.value.trim() ? redondear(numeroDe(i.value)) : igual };
+      });
     const miParte = redondear(total - partes.reduce((t, x) => t + x.importe, 0));
     if (!(miParte > 0) || partes.some(x => !(x.importe > 0))) {
       resumen.innerHTML = `<span class="neg">Revisa los importes: tu parte tiene que ser más de 0 €.</span>`;
       return;
     }
     const pago = (form.querySelector('[name=pago]:checked') || {}).value || '';
+    let notas = '';
+    if (modo === 'articulos') {
+      const sinAsignar = leerAsignacion(cajaArt, b._articulos).filter(l => !l.length).length;
+      if (sinAsignar) notas += `<br>${sinAsignar === 1 ? '1 artículo sin asignar se divide' : sinAsignar + ' artículos sin asignar se dividen'} entre todos.`;
+      const suma = redondear(b._articulos.reduce((t, a) => t + a.importe, 0));
+      if (Math.abs(suma - total) >= 0.01) notas += `<br>Los artículos suman ${eur(suma)}: la diferencia con el total se reparte en proporción.`;
+    }
     resumen.innerHTML = `Como gasto se apunta <b>tu parte: ${eur(miParte)}</b> de ${eur(total)}.<br>` + (pago
       ? `Le debes ${eur(miParte)} a ${esc(pago)}.`
-      : partes.map(x => `${esc(x.persona)} te debe ${eur(x.importe)}.`).join('<br>'));
+      : partes.map(x => `${esc(x.persona)} te debe ${eur(x.importe)}.`).join('<br>')) + notas;
+  }
+
+  function leerAsignacion(caja, articulos) {
+    return articulos.map((_, i) => [...caja.querySelectorAll(`[data-art="${i}"]:checked`)].map(x => x.value));
+  }
+
+  // Cada artículo se divide entre quienes lo tienen marcado; sin nadie, entre todos. Si no suman el total
+  // (descuentos, propina o algo mal leído), la diferencia se reparte en proporción. Tu parte es lo que queda.
+  function partesPorArticulos(total, articulos, asignacion, nombres) {
+    const suma = articulos.reduce((t, a) => t + a.importe, 0);
+    const factor = suma > 0 ? total / suma : 0;
+    const cuenta = {};
+    nombres.forEach(n => { cuenta[n] = 0; });
+    articulos.forEach((a, i) => {
+      const marcados = (asignacion[i] || []).filter(n => n === '' || nombres.includes(n));
+      const quienes = marcados.length ? marcados : [''].concat(nombres);
+      quienes.forEach(n => { if (n) cuenta[n] += a.importe * factor / quienes.length; });
+    });
+    return nombres.map(persona => ({ persona, importe: redondear(cuenta[persona]) }));
   }
 
   // null: lo pagas tú todo. false: falta algo y ya se ha avisado.
@@ -655,7 +705,17 @@
     if (!quien || quien.value !== 'amigos') return null;
     const nombres = amigosMarcados(form);
     if (!nombres.length) { avisar('Elige con quién lo pagas'); return false; }
-    const aMano = form.querySelector('[name=modo]:checked').value === 'mano';
+    const modo = form.querySelector('[name=modo]:checked').value;
+    if (modo === 'articulos') {
+      const b = form.querySelector('[data-reparto]');
+      const asignacion = leerAsignacion(b.querySelector('[data-articulos]'), b._articulos);
+      return {
+        amigos: partesPorArticulos(Number(b.dataset.total), b._articulos, asignacion, nombres),
+        pago: (form.querySelector('[name=pago]:checked') || {}).value || '',
+        asignacion,
+      };
+    }
+    const aMano = modo === 'mano';
     return {
       amigos: nombres.map(persona => {
         const i = aMano ? [...form.querySelectorAll('[data-parte]')].find(x => x.dataset.parte === persona) : null;
@@ -1164,7 +1224,7 @@
         <div class="fila">${campoFoto('Foto del ticket')}<button type="button" class="x" data-act="quitarFoto" aria-label="Quitar la foto" hidden>✕</button></div>
         <div class="etq">¿Quién lo paga?</div>
         ${campoQuien(false)}
-        ${bloqueReparto(0, [], true)}
+        ${bloqueReparto(0, [], { sinTotal: true })}
         <button class="boton">Subir</button>`, () => subirPendiente($('modal')));
     },
     verPendiente(el) {
@@ -1213,12 +1273,22 @@
           : `<div class="fila">${campoFoto('Añadir ticket', `data-mov="${esc(m.id)}"`)}</div>`}
         <div class="etq">¿Quién lo paga?</div>
         ${campoQuien(compartido)}
-        ${bloqueReparto(m.total || m.importe, marcados)}
+        ${bloqueReparto(m.total || m.importe, marcados, {
+          articulos: m.articulos || [],
+          modo: (m.asignacion || []).length ? 'articulos' : 'igual',
+          pie: !m.ticket || (m.articulos || []).length || !D.pcVisto ? ''
+            : m.estadoTicket === 'articulos' ? '<div class="nota">Claude leerá los artículos cuando tu PC esté encendido.</div>'
+            : m.estadoTicket === 'sin_articulos' ? '<div class="nota">No he podido leer los artículos de esta foto. Repártelo a mano.</div>'
+            : `<button type="button" class="enlace" style="text-align:left" data-act="pedirArticulos" data-id="${esc(m.id)}">Repartir por artículos: pide a Claude que los lea</button>`,
+        })}
         <button class="boton" data-guardar-reparto ${compartido ? 'data-compartido="1"' : 'hidden'}>Guardar reparto</button>`, () => {
         const rep = leerReparto($('modal'));
         if (rep === false) return false;
-        return hacer('repartirMov', { id: m.id, amigos: rep ? rep.amigos : [], pago: rep ? rep.pago : '' });
+        return hacer('repartirMov', Object.assign({ id: m.id, amigos: [], pago: '' }, rep || {}));
       });
+      const bloque = $('modal').querySelector('[data-reparto]');
+      bloque._articulos = m.articulos || [];
+      bloque._asignacion = m.asignacion || [];
       const cajaPago = $('modal').querySelector('[data-pago]');
       cajaPago.dataset.inicial = m.pago;
       actualizarReparto($('modal'));
@@ -1338,7 +1408,7 @@
       const g = form.querySelector('[data-guardar-reparto]');
       if (g) g.hidden = !conAmigos && !g.dataset.compartido;
     }
-    if (e.target.matches('[data-amigo], [name=modo], [name=pago], [name=quien]')) actualizarReparto(form);
+    if (e.target.matches('[data-amigo], [data-art], [name=modo], [name=pago], [name=quien]')) actualizarReparto(form);
   });
 
   document.addEventListener('input', e => {
