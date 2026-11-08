@@ -142,6 +142,31 @@
   .nota { color: var(--dim); font-size: 12px; margin-top: 4px; }
   .enlace { background: none; border: 0; color: var(--accent); font-weight: 600; font-size: 14px; padding: 8px 0; }
 
+  /* Ticket y reparto */
+  .que.toque { background: none; border: 0; padding: 0; text-align: left; }
+  .marca { color: var(--dim); display: flex; flex: 0 0 auto; }
+  .fotoBtn {
+    position: relative; flex: 0 0 auto; display: flex; align-items: center; gap: 7px; height: 40px; padding: 0 12px;
+    border: 1px solid var(--line2); border-radius: 12px; font-size: 14px; font-weight: 600; overflow: hidden; cursor: pointer;
+  }
+  .fotoBtn input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+  .fotoBtn img { width: 24px; height: 24px; border-radius: 6px; object-fit: cover; display: block; }
+  .fotoBtn.puesta { border-color: var(--accent); color: var(--accent); }
+  .segQuien span { white-space: nowrap; padding-left: 4px; padding-right: 4px; }
+  .resumenRep { background: var(--bg); border: 1px solid var(--line2); border-radius: 14px; padding: 10px 12px; font-size: 13px; line-height: 1.6; }
+  .parteFila { display: flex; align-items: center; gap: 8px; }
+  .parteFila span { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .parteFila input { flex: 0 0 104px; width: 104px; text-align: right; }
+  .galeria { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .galeria button { padding: 0; min-width: 0; text-align: left; overflow: hidden; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+  .galeria .foto { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 3 / 4; object-fit: cover; background: var(--track); color: var(--dim); }
+  .galeria .pie { display: block; padding: 6px 8px 8px; }
+  .galeria .pie b, .galeria .pie small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .galeria .pie b { font-size: 13px; font-variant-numeric: tabular-nums; }
+  .galeria .pie small { font-size: 11px; color: var(--muted); }
+  .fotoGrande { min-height: 80px; }
+  .fotoGrande img { display: block; width: 100%; border-radius: 14px; }
+
   /* Más */
   .menu { display: flex; flex-direction: column; gap: 8px; }
   .menu button {
@@ -277,6 +302,8 @@
     proyectos: '<path d="M3 7h18v13H3z"/><path d="M8 7V4h8v3"/>',
     deudas: '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M19 8v6M16 11h6"/>',
     deseos: '<path d="M12 21s-8-5-8-11a5 5 0 0 1 8-4 5 5 0 0 1 8 4c0 6-8 11-8 11z"/>',
+    tickets: '<path d="M5 3v18l2.5-1.5L10 21l2-1.5 2 1.5 2.5-1.5L19 21V3l-2.5 1.5L14 3l-2 1.5L10 3 7.5 4.5z"/><path d="M9 9.5h6M9 13.5h6"/>',
+    camara: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
     stats: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
     temas: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',
     conexiones: '<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
@@ -286,7 +313,7 @@
 
   const TABS = [['inicio', 'Inicio'], ['movs', 'Movimientos'], ['ahorro', 'Ahorro'], ['fijos', 'Fijos'], ['mas', 'Más']];
   const SUB = {
-    proyectos: 'Proyectos', deudas: 'Quién me debe', deseos: 'Lista de deseos',
+    tickets: 'Tickets', proyectos: 'Proyectos', deudas: 'Quién me debe', deseos: 'Lista de deseos',
     stats: 'Estadísticas', temas: 'Temas y presupuestos', conexiones: 'Atajos y widget',
   };
 
@@ -334,6 +361,8 @@
   async function llamarApi(fn, args) {
     const r = fn === 'datos'
       ? await fetch(API + '?accion=datos&k=' + encodeURIComponent(K) + (args[0] ? '&mes=' + args[0] : ''))
+      : fn === 'ticket'
+      ? await fetch(API + '?accion=ticket&k=' + encodeURIComponent(K) + '&id=' + encodeURIComponent(args[0]))
       : await fetch(API, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -367,7 +396,8 @@
     try {
       D = await run('datos', m || null);
       mes = D.mes;
-      pintar();
+      const rapido = $('rapido');
+      if (m || !(rapido && rapido.dataset.sucio)) pintar();
       if (!m) guardarCache(D);
     } catch (e) {
       if (/clave/i.test(e.message) && !EN_GOOGLE) pantallaClave(e.message);
@@ -466,8 +496,10 @@
   // ---------- Pintar ----------
 
   function pintar() {
+    // La web es la misma para todos: los servidores sin actualizar no tienen tickets.
+    if (vista === 'tickets' && !D.conTickets) vista = 'mas';
     const esSub = !!SUB[vista];
-    const conMes = ['inicio', 'movs', 'stats'].includes(vista);
+    const conMes = ['inicio', 'movs', 'stats', 'tickets'].includes(vista);
     $('atras').hidden = !esSub;
     $('mesnav').hidden = !conMes;
     $('despues').disabled = mes >= D.hoy;
@@ -513,13 +545,208 @@
         <input class="campo" name="nota" placeholder="Nota (opcional)">
         <input class="campo" name="fecha" type="date" value="${hoyISO()}" aria-label="Fecha">
       </div>
+      ${D.conTickets ? `<div class="pila" data-solo-gasto>
+        <div class="fila">
+          ${campoFoto('Ticket')}
+          <button type="button" class="x" data-act="quitarFoto" aria-label="Quitar la foto" hidden>✕</button>
+          ${campoQuien(false)}
+        </div>
+        ${bloqueReparto()}
+      </div>` : ''}
       ${proy}
       ${conBoton ? '' : '<button class="boton">Apuntar</button>'}`;
+  }
+
+  function campoFoto(texto, attrs = 'data-foto="form"') {
+    return `<label class="fotoBtn">${ico('camara', 18)}<span>${esc(texto)}</span><input type="file" accept="image/*" ${attrs} aria-label="Foto del ticket"></label>`;
+  }
+
+  function campoQuien(conAmigos) {
+    return `<div class="seg segQuien" style="flex:1;min-width:0" role="radiogroup" aria-label="Quién paga">
+      <label><input type="radio" name="quien" value="yo" ${conAmigos ? '' : 'checked'}><span>Yo todo</span></label>
+      <label><input type="radio" name="quien" value="amigos" ${conAmigos ? 'checked' : ''}><span>Con amigos</span></label>
+    </div>`;
+  }
+
+  const chipAmigo = (nombre, marcado) => `<label><input type="checkbox" data-amigo value="${esc(nombre)}" ${marcado ? 'checked' : ''}><span>${esc(nombre)}</span></label>`;
+
+  // total: fijo al repartir un gasto ya apuntado; si no, se lee del campo importe.
+  function bloqueReparto(total, marcados = []) {
+    const nombres = D.amigos.slice();
+    marcados.forEach(n => { if (!nombres.includes(n)) nombres.unshift(n); });
+    return `<div class="pila" data-reparto ${total ? `data-total="${total}"` : ''} ${marcados.length ? '' : 'hidden'}>
+      <div class="etq">¿Con quién?</div>
+      <div class="chips" data-amigos>${nombres.map(n => chipAmigo(n, marcados.includes(n))).join('')}</div>
+      <div class="fila">
+        <input class="campo" data-nuevo-amigo placeholder="Añadir amigo" aria-label="Nombre del amigo" autocapitalize="words">
+        <button type="button" class="boton peq sec" data-act="anadirAmigo">Añadir</button>
+      </div>
+      <div class="pila" data-detalle hidden>
+        <div class="seg" role="radiogroup" aria-label="Cómo se reparte">
+          <label><input type="radio" name="modo" value="igual" checked><span>A partes iguales</span></label>
+          <label><input type="radio" name="modo" value="mano"><span>A mano</span></label>
+        </div>
+        <div class="pila" data-partes hidden></div>
+        <div class="etq">¿Quién ha pagado el ticket?</div>
+        <div class="chips" data-pago></div>
+        <div class="resumenRep" data-resumen></div>
+      </div>
+    </div>`;
+  }
+
+  const numeroDe = v => Number(String(v == null ? '' : v).trim().replace(/\s|€/g, '').replace(',', '.'));
+  const redondear = n => Math.round(n * 100) / 100;
+  const amigosMarcados = form => [...form.querySelectorAll('[data-amigo]:checked')].map(i => i.value);
+
+  // Misma cuenta que calcularReparto_ del servidor, para enseñarla antes de guardar.
+  function actualizarReparto(form) {
+    const b = form.querySelector('[data-reparto]');
+    if (!b) return;
+    const nombres = amigosMarcados(form);
+    b.querySelector('[data-detalle]').hidden = !nombres.length;
+    if (!nombres.length) return;
+
+    const clave = nombres.join('|');
+    const cajaPago = b.querySelector('[data-pago]');
+    if (cajaPago.dataset.n !== clave) {
+      const antes = (form.querySelector('[name=pago]:checked') || {}).value || cajaPago.dataset.inicial || '';
+      const sigue = nombres.includes(antes) ? antes : '';
+      cajaPago.innerHTML = chip('pago', '', 'Yo', !sigue) + nombres.map(n => chip('pago', n, n, n === sigue)).join('');
+      cajaPago.dataset.n = clave;
+    }
+    const aMano = form.querySelector('[name=modo]:checked').value === 'mano';
+    const cajaPartes = b.querySelector('[data-partes]');
+    cajaPartes.hidden = !aMano;
+
+    const total = redondear(b.dataset.total ? Number(b.dataset.total) : numeroDe((form.querySelector('[name=importe]') || {}).value));
+    const igual = total > 0 ? redondear(total / (nombres.length + 1)) : 0;
+    if (aMano) {
+      if (cajaPartes.dataset.n !== clave) {
+        const valores = {};
+        cajaPartes.querySelectorAll('[data-parte]').forEach(i => { valores[i.dataset.parte] = i.value; });
+        cajaPartes.innerHTML = nombres.map(n => `<div class="parteFila"><span>${esc(n)}</span><input class="campo" data-parte="${esc(n)}" inputmode="decimal" value="${esc(valores[n] || '')}" aria-label="Lo que paga ${esc(n)}"></div>`).join('');
+        cajaPartes.dataset.n = clave;
+      }
+      cajaPartes.querySelectorAll('[data-parte]').forEach(i => { i.placeholder = igual ? igual.toFixed(2).replace('.', ',') : '0,00'; });
+    }
+
+    const resumen = b.querySelector('[data-resumen]');
+    if (!(total > 0)) { resumen.textContent = 'Escribe el importe para ver cuánto le toca a cada uno.'; return; }
+    const partes = nombres.map(persona => {
+      const i = aMano ? [...cajaPartes.querySelectorAll('[data-parte]')].find(x => x.dataset.parte === persona) : null;
+      return { persona, importe: i && i.value.trim() ? redondear(numeroDe(i.value)) : igual };
+    });
+    const miParte = redondear(total - partes.reduce((t, x) => t + x.importe, 0));
+    if (!(miParte > 0) || partes.some(x => !(x.importe > 0))) {
+      resumen.innerHTML = `<span class="neg">Revisa los importes: tu parte tiene que ser más de 0 €.</span>`;
+      return;
+    }
+    const pago = (form.querySelector('[name=pago]:checked') || {}).value || '';
+    resumen.innerHTML = `Como gasto se apunta <b>tu parte: ${eur(miParte)}</b> de ${eur(total)}.<br>` + (pago
+      ? `Le debes ${eur(miParte)} a ${esc(pago)}.`
+      : partes.map(x => `${esc(x.persona)} te debe ${eur(x.importe)}.`).join('<br>'));
+  }
+
+  // null: lo pagas tú todo. false: falta algo y ya se ha avisado.
+  function leerReparto(form) {
+    const quien = form.querySelector('[name=quien]:checked');
+    if (!quien || quien.value !== 'amigos') return null;
+    const nombres = amigosMarcados(form);
+    if (!nombres.length) { avisar('Elige con quién lo pagas'); return false; }
+    const aMano = form.querySelector('[name=modo]:checked').value === 'mano';
+    return {
+      amigos: nombres.map(persona => {
+        const i = aMano ? [...form.querySelectorAll('[data-parte]')].find(x => x.dataset.parte === persona) : null;
+        return { persona, importe: i ? i.value.trim() : '' };
+      }),
+      pago: (form.querySelector('[name=pago]:checked') || {}).value || '',
+    };
+  }
+
+  function anadirAmigo(form) {
+    const campo = form.querySelector('[data-nuevo-amigo]');
+    const nombre = campo.value.trim();
+    if (!nombre) return;
+    const existente = [...form.querySelectorAll('[data-amigo]')].find(i => i.value.toLowerCase() === nombre.toLowerCase());
+    if (existente) existente.checked = true;
+    else form.querySelector('[data-amigos]').insertAdjacentHTML('beforeend', chipAmigo(nombre, true));
+    campo.value = '';
+    actualizarReparto(form);
+  }
+
+  // La foto se comprime en el móvil antes de subirla: una de 5 MB se queda en unos 500 KB.
+  function comprimirFoto(file) {
+    return new Promise((ok, ko) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const lienzo = (w, h) => {
+          const c = document.createElement('canvas');
+          c.width = w;
+          c.height = h;
+          const g = c.getContext('2d');
+          g.fillStyle = '#fff';
+          g.fillRect(0, 0, w, h);
+          return [c, g];
+        };
+        const iw = img.naturalWidth, ih = img.naturalHeight;
+        const k = Math.min(1, 1800 / Math.max(iw, ih));
+        const w = Math.round(iw * k), h = Math.round(ih * k);
+        const [c, g] = lienzo(w, h);
+        g.drawImage(img, 0, 0, w, h);
+        // Miniatura con la parte de arriba del ticket, que es donde sale la tienda.
+        const mw = 150, mh = 200;
+        const [cm, gm] = lienzo(mw, mh);
+        const r = Math.max(mw / iw, mh / ih);
+        gm.drawImage(img, (mw - iw * r) / 2, 0, iw * r, ih * r);
+        ok({ foto: c.toDataURL('image/jpeg', 0.72), mini: cm.toDataURL('image/jpeg', 0.5) });
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); ko(new Error('imagen')); };
+      img.src = url;
+    });
+  }
+
+  async function elegirFoto(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const form = input.closest('form');
+    let foto;
+    try {
+      foto = await comprimirFoto(file);
+    } catch (e) {
+      input.value = '';
+      avisar('No he podido leer esa imagen');
+      return;
+    }
+    input.value = '';
+    // En el detalle de un gasto ya apuntado se sube al momento.
+    if (input.dataset.mov) {
+      const id = input.dataset.mov;
+      avisar('Subiendo ticket…');
+      delete FOTOS[id];
+      if (await hacer('ticketMov', { id, foto: foto.foto, mini: foto.mini })) MODALES.verMov({ dataset: { id } });
+      return;
+    }
+    form._foto = foto;
+    form.dataset.sucio = '1';
+    pintarFotoForm(form);
+  }
+
+  function pintarFotoForm(form) {
+    const btn = form.querySelector('[data-foto="form"]').closest('.fotoBtn');
+    const quitar = form.querySelector('[data-act=quitarFoto]');
+    const puesta = !!form._foto;
+    btn.classList.toggle('puesta', puesta);
+    btn.querySelector('svg, img').outerHTML = puesta ? `<img src="${esc(form._foto.mini)}" alt="">` : ico('camara', 18);
+    quitar.hidden = !puesta;
   }
 
   function prepararFormMov(form) {
     const pintarTemas = () => {
       const tipo = form.querySelector('[name=tipo]:checked').value;
+      const soloGasto = form.querySelector('[data-solo-gasto]');
+      if (soloGasto) soloGasto.hidden = tipo !== 'gasto';
       form.querySelector('[data-temas]').innerHTML = D.temas.filter(t => t.tipo === tipo)
         .map(t => chip('tema', t.tema, t.tema, false, tipo === 'gasto' ? colorTema(t.tema) : '')).join('');
     };
@@ -532,6 +759,17 @@
     if (!f.importe) { avisar('Escribe el importe'); return false; }
     if (!f.tema) { avisar('Elige un tema'); return false; }
     if (f.fecha === hoyISO()) f.fecha = '';
+    if (f.tipo !== 'ingreso') {
+      const rep = leerReparto(form);
+      if (rep === false) return false;
+      if (rep) Object.assign(f, rep);
+      if (form._foto) {
+        Object.assign(f, form._foto);
+        avisar('Subiendo ticket…');
+      }
+    }
+    delete f.quien;
+    delete f.modo;
     mes = f.fecha ? f.fecha.slice(0, 7) : D.hoy;
     return hacer('mov', f);
   }
@@ -661,10 +899,24 @@
       </div>`;
     },
 
+    tickets() {
+      const lista = D.movs.filter(m => m.ticket);
+      return `<div class="pila">
+        <button type="button" class="boton" data-act="nuevoTicket">Subir ticket</button>
+        ${lista.length ? `<div class="galeria">${lista.map(m => `<button type="button" data-act="verMov" data-id="${esc(m.id)}" aria-label="Ticket de ${esc(m.nota || m.tema)}, ${eur(m.total || m.importe)}">
+            ${m.mini ? `<img class="foto" src="${esc(m.mini)}" alt="">` : `<span class="foto">${ico('tickets', 26)}</span>`}
+            <span class="pie"><b>${eur(m.total || m.importe)}</b><small>${esc(m.nota || m.tema)}</small><small>${fechaCorta(m.dia)}</small></span>
+          </button>`).join('')}</div>` : `<div class="tile">${vacio('Aún no hay tickets en ' + esc(nombreMes(mes)) + '.')}</div>`}
+        <div class="nota">¿Ya lo apuntaste con el atajo? Toca el gasto en Movimientos y añádele el ticket. Las fotos se guardan en la carpeta «Lima - Tickets» de tu Drive.</div>
+      </div>`;
+    },
+
     mas() {
       const teDeben = D.deudas.filter(d => !d.pagada && d.sentido === 'me_debe').reduce((s, d) => s + d.importe, 0);
       const esperando = D.deseos.filter(d => d.estado === 'esperando').length;
+      const nTickets = D.movs.filter(m => m.ticket).length;
       const filas = [
+        ...(D.conTickets ? [['tickets', nTickets ? nTickets + (nTickets === 1 ? ' ticket' : ' tickets') + ' en ' + nombreMes(mes) : 'Fotos de tus compras']] : []),
         ['proyectos', D.proyectos.length ? D.proyectos.length + (D.proyectos.length === 1 ? ' proyecto' : ' proyectos') : '¿Ganan o pierden dinero?'],
         ['deudas', teDeben ? 'Te deben ' + eur(teDeben) : 'Préstamos entre amigos'],
         ['deseos', esperando ? esperando + ' esperando 48 h' : 'Piénsalo antes de comprar'],
@@ -711,6 +963,7 @@
         </div>
         <div class="tile lista">${pend.length ? pend.map(fila).join('') : vacio('Todo saldado.')}</div>
         <button type="button" class="boton sec" data-act="nuevaDeuda">Apuntar deuda</button>
+        <div class="nota">Cuando te devuelvan el dinero, márcala como pagada. No lo apuntes también como ingreso: como gasto ya solo contaba tu parte.</div>
         ${pagadas.length ? `<div class="dia">Pagadas</div><div class="tile lista" style="opacity:.7">${pagadas.map(fila).join('')}</div>` : ''}
       </div>`;
     },
@@ -814,10 +1067,13 @@
 
   function filaMov(m, conBorrar) {
     const ing = m.tipo === 'ingreso';
-    const extra = [m.nota ? m.tema : '', m.proyecto, m.origen === 'fijo' ? 'fijo' : '', conBorrar ? m.hora : fechaCorta(m.dia)].filter(Boolean).join(' · ');
+    const extra = [m.total ? 'Tu parte de ' + eur(m.total) : '', m.nota ? m.tema : '', m.proyecto, m.origen === 'fijo' ? 'fijo' : '', conBorrar ? m.hora : fechaCorta(m.dia)].filter(Boolean).join(' · ');
+    // Los gastos se abren para añadir el ticket o repartirlos.
+    const abrir = D.conTickets && !ing;
     return `<div class="item">
       <span class="punto" style="background:${colorTema(m.tema, m.tipo)}"></span>
-      <div class="que"><b>${esc(m.nota || m.tema)}</b><small>${esc(extra)}</small></div>
+      ${abrir ? `<button type="button" class="que toque" data-act="verMov" data-id="${esc(m.id)}">` : '<div class="que">'}<b>${esc(m.nota || m.tema)}</b><small>${esc(extra)}</small>${abrir ? '</button>' : '</div>'}
+      ${m.ticket ? `<span class="marca" title="Con ticket">${ico('tickets', 16)}</span>` : ''}
       <div class="cifra ${ing ? 'pos' : ''}">${ing ? '+' : '−'}${eur(m.importe)}</div>
       ${conBorrar ? borrar('borrarMov', `data-id="${esc(m.id)}"`) : ''}
     </div>`;
@@ -828,9 +1084,10 @@
   function abrirModal(titulo, cuerpo, guardar) {
     $('modalTitulo').textContent = titulo;
     $('modalCuerpo').innerHTML = cuerpo;
+    $('modal')._foto = null;
     alGuardar = guardar;
     $('velo').hidden = false;
-    const primero = $('modalCuerpo').querySelector('input:not([type=radio]):not([type=date])');
+    const primero = $('modalCuerpo').querySelector('input:not([type=radio]):not([type=date]):not([type=file]):not([type=checkbox]):not([data-nuevo-amigo])');
     if (primero) setTimeout(() => primero.focus(), 50);
   }
   function cerrarModal() { $('velo').hidden = true; alGuardar = null; }
@@ -839,7 +1096,7 @@
   $('modal').addEventListener('submit', async e => {
     e.preventDefault();
     if (!alGuardar) return;
-    const boton = $('modal').querySelector('.boton');
+    const boton = $('modal').querySelector('.boton:not([type=button])');
     if (boton) boton.disabled = true;
     const ok = await alGuardar(Object.fromEntries(new FormData($('modal'))));
     if (boton) boton.disabled = false;
@@ -849,10 +1106,57 @@
   const campoImporte = (name, ph) => `<div class="importe"><label><input name="${name}" inputmode="decimal" placeholder="${ph || '0,00'}" aria-label="${ph || 'Importe'}"><span>€</span></label></div>`;
   const opcionesTema = sel => `<div class="chips">${D.temas.filter(t => t.tipo === 'gasto').map(t => chip('tema', t.tema, t.tema, t.tema === sel, colorTema(t.tema))).join('')}</div>`;
 
+  // Fotos ya pedidas al servidor, para no volver a descargarlas.
+  const FOTOS = {};
+
+  async function cargarFotoGrande(m) {
+    const caja = $('modalCuerpo').querySelector('[data-foto-grande]');
+    try {
+      const r = FOTOS[m.id] || (FOTOS[m.id] = await run('ticket', m.id));
+      if (caja.isConnected) caja.innerHTML = `<img src="${esc(r.foto)}" alt="Ticket de ${esc(m.nota || m.tema)}">`;
+    } catch (e) {
+      if (caja.isConnected) caja.innerHTML = vacio('No se ha podido cargar la foto. ' + esc(e.message));
+    }
+  }
+
   const MODALES = {
     nuevoMov() {
       abrirModal('Apuntar', formMov(false), () => enviarMov($('modal')));
       prepararFormMov($('modal'));
+    },
+    nuevoTicket() {
+      abrirModal('Subir ticket', formMov(false), () => enviarMov($('modal')));
+      prepararFormMov($('modal'));
+    },
+    verMov(el) {
+      const m = D.movs.find(x => x.id === el.dataset.id);
+      if (!m) return;
+      const compartido = m.total > 0;
+      const marcados = compartido ? m.reparto.split(', ').filter(Boolean) : [];
+      abrirModal(m.nota || m.tema, `<div>
+          <div class="val" style="font-size:30px;font-weight:700">${eur(m.importe)}</div>
+          <div class="sub">${esc(m.tema)} · ${fechaCorta(m.dia)}${compartido ? ` · tu parte de ${eur(m.total)}` : ''}</div>
+        </div>
+        ${m.ticket
+          ? `<div class="fotoGrande" data-foto-grande><div class="vacio">Cargando la foto…</div></div>
+             <div class="fila">
+               ${campoFoto('Cambiar', `data-mov="${esc(m.id)}"`)}
+               ${m.urlTicket ? `<a class="enlace" style="flex:1;text-decoration:none" href="${esc(m.urlTicket)}" target="_blank" rel="noopener">Abrir en Drive</a>` : '<span style="flex:1"></span>'}
+               ${borrar('quitarTicket', `data-id="${esc(m.id)}"`)}
+             </div>`
+          : `<div class="fila">${campoFoto('Añadir ticket', `data-mov="${esc(m.id)}"`)}</div>`}
+        <div class="etq">¿Quién lo paga?</div>
+        ${campoQuien(compartido)}
+        ${bloqueReparto(m.total || m.importe, marcados)}
+        <button class="boton" data-guardar-reparto ${compartido ? 'data-compartido="1"' : 'hidden'}>Guardar reparto</button>`, () => {
+        const rep = leerReparto($('modal'));
+        if (rep === false) return false;
+        return hacer('repartirMov', { id: m.id, amigos: rep ? rep.amigos : [], pago: rep ? rep.pago : '' });
+      });
+      const cajaPago = $('modal').querySelector('[data-pago]');
+      cajaPago.dataset.inicial = m.pago;
+      actualizarReparto($('modal'));
+      if (m.ticket) cargarFotoGrande(m);
     },
     nuevaHucha() {
       abrirModal('Nueva hucha', `<input class="campo" name="nombre" placeholder="Viaje de verano, ordenador…">${campoImporte('meta', 'Meta')}<button class="boton">Crear hucha</button>`, f => hacer('hucha', f));
@@ -906,6 +1210,12 @@
     if (t.hasAttribute('data-copiar')) { t.select(); return; }
     const act = t.dataset.act;
     if (act === 'filtro') { filtroMovs = t.value; return pintar(); }
+    if (act === 'anadirAmigo') return anadirAmigo(t.closest('form'));
+    if (act === 'quitarFoto') {
+      const form = t.closest('form');
+      form._foto = null;
+      return pintarFotoForm(form);
+    }
     if (act === 'copiarAtajos') {
       try {
         await navigator.clipboard.writeText(t.dataset.texto);
@@ -929,8 +1239,11 @@
     delete d.act;
     delete d.peligro;
     t.disabled = true;
+    const enModal = !!t.closest('#modal');
+    if (act === 'quitarTicket') delete FOTOS[d.id];
     if (act === 'comprar') await hacer('decidirDeseo', { id: d.id, comprar: true });
     else await hacer(act, d);
+    if (enModal) cerrarModal();
   });
 
   document.addEventListener('submit', async e => {
@@ -947,7 +1260,33 @@
 
   document.addEventListener('change', e => {
     const i = e.target.closest('[data-presu]');
-    if (i) hacer('tema', { tema: i.dataset.presu, tipo: 'gasto', presupuesto: i.value || '0' });
+    if (i) return hacer('tema', { tema: i.dataset.presu, tipo: 'gasto', presupuesto: i.value || '0' });
+    const form = e.target.closest('form');
+    if (!form) return;
+    if (form.id === 'rapido') form.dataset.sucio = '1';
+    if (e.target.matches('[data-foto], [data-mov]')) return elegirFoto(e.target);
+    if (e.target.name === 'quien') {
+      const b = form.querySelector('[data-reparto]');
+      const conAmigos = e.target.value === 'amigos';
+      if (b) b.hidden = !conAmigos;
+      const g = form.querySelector('[data-guardar-reparto]');
+      if (g) g.hidden = !conAmigos && !g.dataset.compartido;
+    }
+    if (e.target.matches('[data-amigo], [name=modo], [name=pago], [name=quien]')) actualizarReparto(form);
+  });
+
+  document.addEventListener('input', e => {
+    const form = e.target.closest('form');
+    if (!form) return;
+    if (form.id === 'rapido') form.dataset.sucio = '1';
+    if (e.target.matches('[name=importe], [data-parte]')) actualizarReparto(form);
+  });
+
+  // Intro en «Añadir amigo» añade al amigo, no envía el formulario.
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || !e.target.matches('[data-nuevo-amigo]')) return;
+    e.preventDefault();
+    anadirAmigo(e.target.closest('form'));
   });
 
   if (!K) {

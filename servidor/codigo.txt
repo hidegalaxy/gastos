@@ -11,14 +11,17 @@ const TZ = 'Europe/Madrid';
 
 // Columnas de cada pestaña de la hoja. "Gastos" guarda gastos e ingresos.
 const ESQUEMA = {
-  Gastos: ['id', 'fecha', 'importe', 'tema', 'nota', 'tipo', 'proyecto', 'origen'],
+  // importe = lo que te toca a ti; total, reparto y pago solo se rellenan si lo compartes con amigos.
+  Gastos: ['id', 'fecha', 'importe', 'tema', 'nota', 'tipo', 'proyecto', 'origen', 'total', 'reparto', 'pago'],
   Temas: ['tema', 'presupuesto', 'tipo'],
   Huchas: ['id', 'nombre', 'meta', 'creada'],
   Aportes: ['id', 'fecha', 'hucha', 'importe'],
   Fijos: ['id', 'nombre', 'importe', 'tema', 'dia', 'ultimo', 'proyecto'],
-  Deudas: ['id', 'fecha', 'persona', 'importe', 'sentido', 'concepto', 'pagada'],
+  Deudas: ['id', 'fecha', 'persona', 'importe', 'sentido', 'concepto', 'pagada', 'mov'],
   Deseos: ['id', 'fecha', 'nombre', 'precio', 'estado', 'decidido'],
   Proyectos: ['nombre'],
+  // La foto vive en Drive; aquí queda el enlace y una miniatura pequeña para la galería.
+  Tickets: ['mov', 'archivo', 'url', 'mini', 'fecha'],
 };
 const TEMAS_GASTO = ['Súper', 'Comida fuera', 'Transporte', 'Ocio', 'Suscripciones', 'Compras', 'Estudios', 'Otros'];
 const TEMAS_INGRESO = ['Sueldo', 'Bizum', 'Ventas', 'Regalos', 'Otros ingresos'];
@@ -68,6 +71,7 @@ function configurar() {
   if (!props.getProperty('CLAVE')) {
     props.setProperty('CLAVE', Utilities.getUuid().replace(/-/g, '').slice(0, 16));
   }
+  carpetaTickets_();
   Logger.log('Hoja: ' + ss.getUrl());
   Logger.log('Clave: ' + props.getProperty('CLAVE'));
 }
@@ -96,11 +100,12 @@ function diario() {
 // GET ?k=CLAVE&accion=widget       → datos para el widget de Scriptable
 // GET ?k=CLAVE&accion=scriptable   → código del widget, listo para copiar
 // GET ?k=CLAVE&accion=datos[&mes=] → datos del panel en JSON (para la web propia)
+// GET ?k=CLAVE&accion=ticket&id=MOV → foto del ticket de un movimiento, en JSON
 // GET (sin clave) o ?accion=instalar → página para instalar Lima en el iPhone
 function doGet(e) {
   const p = e.parameter;
   if (p.accion === 'instalar' || (!p.k && !p.accion)) return paginaInstalar_(p.k);
-  if (!claveValida_(p.k)) return p.accion === 'datos' ? json_({ error: 'Clave incorrecta' }) : texto_('Clave incorrecta');
+  if (!claveValida_(p.k)) return p.accion === 'datos' || p.accion === 'ticket' ? json_({ error: 'Clave incorrecta' }) : texto_('Clave incorrecta');
   if (p.accion === 'temas') {
     const tipo = p.tipo === 'ingreso' ? 'ingreso' : 'gasto';
     return texto_(temas_().filter(t => t.tipo === tipo).map(t => t.tema).join('\n'));
@@ -114,6 +119,13 @@ function doGet(e) {
     try {
       aplicarFijos_();
       return json_(datos_(p.mes || null));
+    } catch (err) {
+      return json_({ error: err.message });
+    }
+  }
+  if (p.accion === 'ticket') {
+    try {
+      return json_(ticket_(p.id));
     } catch (err) {
       return json_({ error: err.message });
     }
@@ -224,6 +236,11 @@ function datos(k, mes) {
   return datos_(mes);
 }
 
+function ticket(k, id) {
+  comprobar_(k);
+  return ticket_(id);
+}
+
 // Todas las escrituras del panel pasan por aquí y devuelven los datos ya actualizados.
 function accion(k, que, d, mes) {
   comprobar_(k);
@@ -240,8 +257,53 @@ function accion(k, que, d, mes) {
 }
 
 const ACCIONES_ = {
-  mov: d => guardarMov_(d),
-  borrarMov: d => { borrarDonde_('Gastos', r => String(r.id) === d.id); return 'Movimiento borrado'; },
+  mov: d => {
+    const id = nuevoId_('g');
+    const r = calcularReparto_(numero_(d.importe), d.amigos, d.pago);
+    const datosMov = r ? Object.assign({}, d, { importe: r.miParte, total: r.total, reparto: r.con, pago: r.pago }) : d;
+    let msg = guardarMov_(datosMov, id);
+    if (r) {
+      apuntarDeudas_(r, id, limpiar_(d.nota) || limpiar_(d.tema));
+      msg += ' ' + textoDeudas_(r);
+    }
+    if (!d.foto) return msg;
+    // El gasto ya está guardado: si falla la foto, no se pierde y se puede volver a subir.
+    try {
+      guardarTicket_(id, d.foto, d.mini, limpiar_(d.nota) || limpiar_(d.tema));
+    } catch (err) {
+      msg += ' La foto no se ha guardado: ' + err.message;
+    }
+    return msg;
+  },
+  borrarMov: d => {
+    quitarTicket_(d.id);
+    // Las deudas ya pagadas se quedan como historial.
+    borrarDonde_('Deudas', r => String(r.mov) === d.id && !r.pagada);
+    borrarDonde_('Gastos', r => String(r.id) === d.id);
+    return 'Movimiento borrado';
+  },
+  // Sin amigos, el gasto vuelve a ser entero tuyo.
+  repartirMov: d => {
+    const fila = leer_('Gastos').find(r => String(r.id) === d.id);
+    if (!fila) throw new Error('No encuentro ese gasto');
+    if (leer_('Deudas').some(r => String(r.mov) === d.id && r.pagada)) {
+      throw new Error('Alguien ya ha pagado su parte: no se puede cambiar el reparto');
+    }
+    const total = Number(fila.total) || Number(fila.importe) || 0;
+    const r = calcularReparto_(total, d.amigos, d.pago);
+    borrarDonde_('Deudas', x => String(x.mov) === d.id);
+    actualizar_('Gastos', fila._fila, { importe: r ? r.miParte : total, total: r ? r.total : '', reparto: r ? r.con : '', pago: r ? r.pago : '' });
+    if (!r) return 'Ahora lo pagas tú todo';
+    apuntarDeudas_(r, d.id, String(fila.nota || fila.tema));
+    return 'Tu parte: ' + eur_(r.miParte) + '. ' + textoDeudas_(r);
+  },
+  ticketMov: d => {
+    const fila = leer_('Gastos').find(r => String(r.id) === d.id);
+    if (!fila) throw new Error('No encuentro ese gasto');
+    guardarTicket_(d.id, d.foto, d.mini, String(fila.nota || fila.tema));
+    return 'Ticket guardado';
+  },
+  quitarTicket: d => { quitarTicket_(d.id); return 'Ticket quitado'; },
 
   tema: d => {
     const tema = limpiar_(d.tema);
@@ -358,6 +420,9 @@ function datos_(mes) {
   const movs = movimientos_();
   const temas = temas_();
   const aportes = aportes_();
+  const conTickets = !!libro_().getSheetByName('Tickets');
+  const tickets = {};
+  if (conTickets) leer_('Tickets').forEach(t => { tickets[String(t.mov)] = t; });
   const r = resumen_(mes, movs, temas, aportes);
   const ant = resumen_(mesMas_(mes, -1), movs, temas, aportes);
   const diasMes = diasDelMes_(mes);
@@ -404,8 +469,14 @@ function datos_(mes) {
   const deudas = leer_('Deudas').map(x => ({
     id: String(x.id), dia: diaDe_(new Date(x.fecha)), persona: String(x.persona), importe: Number(x.importe) || 0,
     sentido: x.sentido === 'debo' ? 'debo' : 'me_debe', concepto: String(x.concepto || ''),
-    pagada: x.pagada ? diaDe_(new Date(x.pagada)) : '',
+    pagada: x.pagada ? diaDe_(new Date(x.pagada)) : '', mov: String(x.mov || ''),
   })).sort((a, b) => a.dia < b.dia ? 1 : -1);
+
+  // Los amigos salen de las deudas y de los repartos: los últimos, primero. Sin repetir aunque cambien las mayúsculas.
+  const amigos = [];
+  const recordar = n => { if (n && !amigos.some(a => a.toLowerCase() === n.toLowerCase())) amigos.push(n); };
+  deudas.forEach(x => recordar(x.persona));
+  movs.forEach(x => x.reparto.split(', ').forEach(recordar));
 
   const deseos = leer_('Deseos').map(x => ({
     id: String(x.id), nombre: String(x.nombre), precio: Number(x.precio) || 0, estado: String(x.estado || 'esperando'),
@@ -431,11 +502,16 @@ function datos_(mes) {
     porTema: r.porTema.sort((a, b) => b.total - a.total),
     diario: diario.map(redondear_),
     sinGastar, racha,
-    movs: r.delMes.sort((a, b) => b.fecha - a.fecha).map(x => ({
-      id: x.id, dia: diaDe_(x.fecha), hora: Utilities.formatDate(x.fecha, TZ, 'HH:mm'),
-      importe: x.importe, tipo: x.tipo, tema: x.tema, nota: x.nota, proyecto: x.proyecto, origen: x.origen,
-    })),
-    temas, fijos, huchas, deudas, deseos, proyectos,
+    movs: r.delMes.sort((a, b) => b.fecha - a.fecha).map(x => {
+      const t = tickets[x.id];
+      return {
+        id: x.id, dia: diaDe_(x.fecha), hora: Utilities.formatDate(x.fecha, TZ, 'HH:mm'),
+        importe: x.importe, tipo: x.tipo, tema: x.tema, nota: x.nota, proyecto: x.proyecto, origen: x.origen,
+        total: x.total, reparto: x.reparto, pago: x.pago,
+        ticket: !!t, mini: t ? String(t.mini || '') : '', urlTicket: t ? String(t.url || '') : '',
+      };
+    }),
+    temas, fijos, huchas, deudas, deseos, proyectos, amigos, conTickets,
     stats: estadisticas_(mes, movs, ahora),
     urlHoja: libro_().getUrl(),
     urlApp: ScriptApp.getService().getUrl(),
@@ -716,7 +792,7 @@ Script.complete();
 
 // ---------- Movimientos y fijos ----------
 
-function guardarMov_(d) {
+function guardarMov_(d, id) {
   const importe = redondear_(numero_(d.importe));
   if (!(importe > 0)) throw new Error('Importe no válido: ' + d.importe);
   const temaDado = limpiar_(d.tema);
@@ -731,7 +807,8 @@ function guardarMov_(d) {
   const tema = temaDado || (tipo === 'ingreso' ? 'Otros ingresos' : 'Otros');
   const fecha = /^\d{4}-\d{2}-\d{2}$/.test(d.fecha || '') ? new Date(d.fecha + 'T12:00:00Z') : new Date();
   anadir_('Gastos', {
-    id: nuevoId_('g'), fecha, importe, tema, nota: d.nota, tipo, proyecto: d.proyecto, origen: d.origen || '',
+    id: id || nuevoId_('g'), fecha, importe, tema, nota: d.nota, tipo, proyecto: d.proyecto, origen: d.origen || '',
+    total: d.total || '', reparto: d.reparto || '', pago: d.pago || '',
   });
 
   const r = resumen_(mesDe_(fecha), movimientos_(), temas_(), aportes_());
@@ -772,6 +849,95 @@ function aplicarFijos_() {
   }
 }
 
+// ---------- Compartir un gasto con amigos ----------
+
+// amigos: [{ persona, importe? }]. Sin importe, a partes iguales; los céntimos que sobran van a tu parte.
+// pago: nombre del amigo que ha pagado el ticket; vacío si has pagado tú. Sin amigos devuelve null.
+function calcularReparto_(total, amigos, pago) {
+  const lista = (Array.isArray(amigos) ? amigos : [])
+    .map(a => ({ persona: limpiar_(a && a.persona), importe: a && a.importe != null && a.importe !== '' ? redondear_(numero_(a.importe)) : null }))
+    .filter(a => a.persona);
+  if (!lista.length) return null;
+  total = redondear_(total);
+  if (!(total > 0)) throw new Error('Importe no válido: ' + total);
+  const igual = redondear_(total / (lista.length + 1));
+  lista.forEach(a => {
+    if (a.importe === null) a.importe = igual;
+    if (!(a.importe > 0)) throw new Error('Revisa lo que paga ' + a.persona);
+  });
+  const miParte = redondear_(total - lista.reduce((s, a) => s + a.importe, 0));
+  if (!(miParte > 0)) throw new Error('Tu parte tiene que ser más de 0 €. Si lo pagan todo ellos, apúntalo como deuda.');
+  const pagador = lista.find(a => a.persona === limpiar_(pago));
+  return {
+    total, miParte, con: lista.map(a => a.persona).join(', '), pago: pagador ? pagador.persona : '',
+    // Si ha pagado un amigo, solo le debes tu parte a él; lo de los demás no es asunto tuyo.
+    deudas: pagador
+      ? [{ persona: pagador.persona, importe: miParte, sentido: 'debo' }]
+      : lista.map(a => ({ persona: a.persona, importe: a.importe, sentido: 'me_debe' })),
+  };
+}
+
+function apuntarDeudas_(r, mov, concepto) {
+  r.deudas.forEach(x => anadir_('Deudas', {
+    id: nuevoId_('d'), fecha: new Date(), persona: x.persona, importe: x.importe,
+    sentido: x.sentido, concepto, pagada: '', mov,
+  }));
+}
+
+function textoDeudas_(r) {
+  if (r.pago) return 'Le debes ' + eur_(r.miParte) + ' a ' + r.pago + '.';
+  return 'Te deben ' + eur_(redondear_(r.total - r.miParte)) + '.';
+}
+
+// ---------- Tickets ----------
+
+// Carpeta privada de Drive. Si la han borrado o viene de la copia de otra persona, se crea otra.
+function carpetaTickets_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('CARPETA_TICKETS');
+  if (id) {
+    try {
+      const c = DriveApp.getFolderById(id);
+      if (!c.isTrashed()) return c;
+    } catch (err) {}
+  }
+  const nueva = DriveApp.createFolder('Lima - Tickets');
+  props.setProperty('CARPETA_TICKETS', nueva.getId());
+  return nueva;
+}
+
+// foto y mini llegan del móvil ya comprimidas, como data:image/...;base64. Sustituye al ticket anterior.
+function guardarTicket_(mov, foto, mini, nombre) {
+  const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(foto || ''));
+  if (!m) throw new Error('Esa imagen no se puede guardar');
+  if (m[2].length > 14000000) throw new Error('La foto es demasiado grande');
+  const seguro = String(nombre || 'ticket').replace(/[\\/:*?"<>|']/g, ' ').trim().slice(0, 60);
+  const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+  const blob = Utilities.newBlob(Utilities.base64Decode(m[2]), 'image/' + m[1], diaDe_(new Date()) + ' ' + seguro + '.' + ext);
+  const archivo = carpetaTickets_().createFile(blob);
+  quitarTicket_(mov);
+  const miniBuena = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(String(mini || '')) && String(mini).length < 45000;
+  anadir_('Tickets', { mov, archivo: archivo.getId(), url: archivo.getUrl(), mini: miniBuena ? mini : '', fecha: new Date() });
+}
+
+// La foto va a la papelera de Drive, de donde aún se puede recuperar durante 30 días.
+function quitarTicket_(mov) {
+  if (!libro_().getSheetByName('Tickets')) return;
+  leer_('Tickets').filter(t => String(t.mov) === String(mov)).forEach(t => {
+    try {
+      DriveApp.getFileById(String(t.archivo)).setTrashed(true);
+    } catch (err) {}
+  });
+  borrarDonde_('Tickets', t => String(t.mov) === String(mov));
+}
+
+function ticket_(mov) {
+  const t = leer_('Tickets').find(x => String(x.mov) === String(mov));
+  if (!t) throw new Error('Este gasto no tiene ticket');
+  const blob = DriveApp.getFileById(String(t.archivo)).getBlob();
+  return { foto: 'data:' + blob.getContentType() + ';base64,' + Utilities.base64Encode(blob.getBytes()), url: String(t.url || '') };
+}
+
 // ---------- Lectura ----------
 
 function movimientos_() {
@@ -784,6 +950,9 @@ function movimientos_() {
     tipo: tipoDe_(r.tipo),
     proyecto: String(r.proyecto == null ? '' : r.proyecto),
     origen: String(r.origen == null ? '' : r.origen),
+    total: Number(r.total) || 0,
+    reparto: String(r.reparto == null ? '' : r.reparto),
+    pago: String(r.pago == null ? '' : r.pago),
   }));
 }
 
