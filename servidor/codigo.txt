@@ -21,7 +21,8 @@ const ESQUEMA = {
   Deseos: ['id', 'fecha', 'nombre', 'precio', 'estado', 'decidido'],
   Proyectos: ['nombre'],
   // La foto vive en Drive; aquí queda el enlace y una miniatura pequeña para la galería.
-  Tickets: ['mov', 'archivo', 'url', 'mini', 'fecha'],
+  // Un ticket sin gasto con su id está «por leer»; reparto guarda con quién se paga hasta entonces.
+  Tickets: ['mov', 'archivo', 'url', 'mini', 'fecha', 'reparto', 'estado'],
 };
 const TEMAS_GASTO = ['Súper', 'Comida fuera', 'Transporte', 'Ocio', 'Suscripciones', 'Compras', 'Estudios', 'Otros'];
 const TEMAS_INGRESO = ['Sueldo', 'Bizum', 'Ventas', 'Regalos', 'Otros ingresos'];
@@ -101,11 +102,12 @@ function diario() {
 // GET ?k=CLAVE&accion=scriptable   → código del widget, listo para copiar
 // GET ?k=CLAVE&accion=datos[&mes=] → datos del panel en JSON (para la web propia)
 // GET ?k=CLAVE&accion=ticket&id=MOV → foto del ticket de un movimiento, en JSON
+// GET ?k=CLAVE&accion=pendientes   → tickets por leer, para el lector del PC
 // GET (sin clave) o ?accion=instalar → página para instalar Lima en el iPhone
 function doGet(e) {
   const p = e.parameter;
   if (p.accion === 'instalar' || (!p.k && !p.accion)) return paginaInstalar_(p.k);
-  if (!claveValida_(p.k)) return p.accion === 'datos' || p.accion === 'ticket' ? json_({ error: 'Clave incorrecta' }) : texto_('Clave incorrecta');
+  if (!claveValida_(p.k)) return p.accion === 'datos' || p.accion === 'ticket' || p.accion === 'pendientes' ? json_({ error: 'Clave incorrecta' }) : texto_('Clave incorrecta');
   if (p.accion === 'temas') {
     const tipo = p.tipo === 'ingreso' ? 'ingreso' : 'gasto';
     return texto_(temas_().filter(t => t.tipo === tipo).map(t => t.tema).join('\n'));
@@ -126,6 +128,13 @@ function doGet(e) {
   if (p.accion === 'ticket') {
     try {
       return json_(ticket_(p.id));
+    } catch (err) {
+      return json_({ error: err.message });
+    }
+  }
+  if (p.accion === 'pendientes') {
+    try {
+      return json_(pendientesPc_());
     } catch (err) {
       return json_({ error: err.message });
     }
@@ -305,6 +314,66 @@ const ACCIONES_ = {
   },
   quitarTicket: d => { quitarTicket_(d.id); return 'Ticket quitado'; },
 
+  // Corrige un gasto. Si estaba repartido y cambia el total, se reparte de nuevo a partes iguales.
+  editarMov: d => {
+    const fila = leer_('Gastos').find(r => String(r.id) === d.id);
+    if (!fila) throw new Error('No encuentro ese gasto');
+    const importe = redondear_(numero_(d.importe));
+    if (!(importe > 0)) throw new Error('Importe no válido: ' + d.importe);
+    const cambios = { tema: limpiar_(d.tema) || String(fila.tema), nota: limpiar_(d.nota) };
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d.fecha || '')) cambios.fecha = new Date(d.fecha + 'T12:00:00Z');
+    if (String(fila.origen) === 'claude') cambios.origen = '';
+    const total = Number(fila.total) || 0;
+    if (!total) {
+      cambios.importe = importe;
+    } else if (importe !== total) {
+      if (leer_('Deudas').some(r => String(r.mov) === d.id && r.pagada)) {
+        throw new Error('Alguien ya ha pagado su parte: no se puede cambiar el total');
+      }
+      const amigos = String(fila.reparto).split(', ').filter(Boolean).map(persona => ({ persona }));
+      const r = calcularReparto_(importe, amigos, String(fila.pago || ''));
+      borrarDonde_('Deudas', x => String(x.mov) === d.id);
+      apuntarDeudas_(r, d.id, cambios.nota || cambios.tema);
+      cambios.importe = r.miParte;
+      cambios.total = r.total;
+    }
+    actualizar_('Gastos', fila._fila, cambios);
+    return 'Gasto corregido';
+  },
+  revisadoMov: d => {
+    const fila = leer_('Gastos').find(r => String(r.id) === d.id);
+    if (fila) actualizar_('Gastos', fila._fila, { origen: '' });
+    return 'Revisado';
+  },
+
+  // Sube solo la foto. El lector del PC apunta el gasto cuando pueda.
+  ticketPendiente: d => {
+    const amigos = (Array.isArray(d.amigos) ? d.amigos : []).map(a => ({ persona: limpiar_(a && a.persona) })).filter(a => a.persona);
+    const reparto = amigos.length ? JSON.stringify({ amigos, pago: limpiar_(d.pago) }) : '';
+    guardarTicket_(nuevoId_('g'), d.foto, d.mini, 'Pendiente', { reparto, estado: '' });
+    return 'Ticket subido: lo leeré cuando tu PC esté encendido';
+  },
+  // Lo que manda el lector del PC. Sale de una foto: lo que no tenga sentido no se da por bueno.
+  leidoTicket: d => {
+    const t = leer_('Tickets').find(x => String(x.mov) === d.id);
+    if (!t) return 'Ese ticket ya no está';
+    const importe = redondear_(Number(d.importe));
+    if (d.ilegible || !(importe > 0 && importe < 100000)) {
+      actualizar_('Tickets', t._fila, { estado: 'ilegible' });
+      return 'No se ha podido leer';
+    }
+    const hoy = diaDe_(new Date());
+    const fecha = String(d.fecha || '');
+    const fechaBuena = /^\d{4}-\d{2}-\d{2}$/.test(fecha) && !isNaN(new Date(fecha + 'T12:00:00Z')) && fecha <= hoy && fecha >= mesMas_(hoy.slice(0, 7), -24);
+    const tema = temas_().some(x => x.tipo === 'gasto' && x.tema === d.tema) ? d.tema : '';
+    return apuntarTicket_(t, { importe, tema, nota: String(d.comercio || '').trim().slice(0, 60), fecha: fechaBuena ? fecha : '' }, 'claude');
+  },
+  completarTicket: d => {
+    const t = leer_('Tickets').find(x => String(x.mov) === d.id);
+    if (!t) throw new Error('Ese ticket ya no está');
+    return apuntarTicket_(t, { importe: d.importe, tema: limpiar_(d.tema), nota: limpiar_(d.nota), fecha: d.fecha }, '');
+  },
+
   tema: d => {
     const tema = limpiar_(d.tema);
     if (!tema) throw new Error('El tema no puede estar vacío');
@@ -423,6 +492,21 @@ function datos_(mes) {
   const conTickets = !!libro_().getSheetByName('Tickets');
   const tickets = {};
   if (conTickets) leer_('Tickets').forEach(t => { tickets[String(t.mov)] = t; });
+  const conGasto = {};
+  movs.forEach(x => { conGasto[x.id] = true; });
+  const pendientes = Object.keys(tickets).filter(id => !conGasto[id]).map(id => {
+    const t = tickets[id];
+    return { id, dia: diaDe_(new Date(t.fecha)), mini: String(t.mini || ''), estado: String(t.estado || ''), con: repartoGuardado_(t).amigos.map(a => a.persona).join(', ') };
+  }).sort((a, b) => a.dia < b.dia ? 1 : -1);
+  const paraPanel = x => {
+    const t = tickets[x.id];
+    return {
+      id: x.id, dia: diaDe_(x.fecha), hora: Utilities.formatDate(x.fecha, TZ, 'HH:mm'),
+      importe: x.importe, tipo: x.tipo, tema: x.tema, nota: x.nota, proyecto: x.proyecto, origen: x.origen,
+      total: x.total, reparto: x.reparto, pago: x.pago,
+      ticket: !!t, mini: t ? String(t.mini || '') : '', urlTicket: t ? String(t.url || '') : '',
+    };
+  };
   const r = resumen_(mes, movs, temas, aportes);
   const ant = resumen_(mesMas_(mes, -1), movs, temas, aportes);
   const diasMes = diasDelMes_(mes);
@@ -502,16 +586,11 @@ function datos_(mes) {
     porTema: r.porTema.sort((a, b) => b.total - a.total),
     diario: diario.map(redondear_),
     sinGastar, racha,
-    movs: r.delMes.sort((a, b) => b.fecha - a.fecha).map(x => {
-      const t = tickets[x.id];
-      return {
-        id: x.id, dia: diaDe_(x.fecha), hora: Utilities.formatDate(x.fecha, TZ, 'HH:mm'),
-        importe: x.importe, tipo: x.tipo, tema: x.tema, nota: x.nota, proyecto: x.proyecto, origen: x.origen,
-        total: x.total, reparto: x.reparto, pago: x.pago,
-        ticket: !!t, mini: t ? String(t.mini || '') : '', urlTicket: t ? String(t.url || '') : '',
-      };
-    }),
-    temas, fijos, huchas, deudas, deseos, proyectos, amigos, conTickets,
+    movs: r.delMes.sort((a, b) => b.fecha - a.fecha).map(paraPanel),
+    temas, fijos, huchas, deudas, deseos, proyectos, amigos, conTickets, pendientes,
+    porRevisar: movs.filter(x => x.origen === 'claude').sort((a, b) => b.fecha - a.fecha).map(paraPanel),
+    // Vacío mientras ningún PC haya mirado: sin lector no tiene sentido subir solo la foto.
+    pcVisto: PropertiesService.getScriptProperties().getProperty('PC_VISTO') || '',
     stats: estadisticas_(mes, movs, ahora),
     urlHoja: libro_().getUrl(),
     urlApp: ScriptApp.getService().getUrl(),
@@ -907,7 +986,7 @@ function carpetaTickets_() {
 }
 
 // foto y mini llegan del móvil ya comprimidas, como data:image/...;base64. Sustituye al ticket anterior.
-function guardarTicket_(mov, foto, mini, nombre) {
+function guardarTicket_(mov, foto, mini, nombre, extra) {
   const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(foto || ''));
   if (!m) throw new Error('Esa imagen no se puede guardar');
   if (m[2].length > 14000000) throw new Error('La foto es demasiado grande');
@@ -917,7 +996,43 @@ function guardarTicket_(mov, foto, mini, nombre) {
   const archivo = carpetaTickets_().createFile(blob);
   quitarTicket_(mov);
   const miniBuena = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(String(mini || '')) && String(mini).length < 45000;
-  anadir_('Tickets', { mov, archivo: archivo.getId(), url: archivo.getUrl(), mini: miniBuena ? mini : '', fecha: new Date() });
+  anadir_('Tickets', Object.assign({ mov, archivo: archivo.getId(), url: archivo.getUrl(), mini: miniBuena ? mini : '', fecha: new Date() }, extra || {}));
+}
+
+function repartoGuardado_(t) {
+  try {
+    const r = JSON.parse(String(t.reparto || ''));
+    return { amigos: Array.isArray(r.amigos) ? r.amigos : [], pago: String(r.pago || '') };
+  } catch (err) {
+    return { amigos: [], pago: '' };
+  }
+}
+
+// Convierte un ticket por leer en su gasto, con la fecha en que se subió si no se sabe otra.
+function apuntarTicket_(t, d, origen) {
+  const id = String(t.mov);
+  if (leer_('Gastos').some(r => String(r.id) === id)) return 'Ya estaba apuntado';
+  const elegido = repartoGuardado_(t);
+  const r = calcularReparto_(numero_(d.importe), elegido.amigos, elegido.pago);
+  const fecha = /^\d{4}-\d{2}-\d{2}$/.test(d.fecha || '') ? d.fecha : diaDe_(new Date(t.fecha));
+  const base = { importe: d.importe, tema: d.tema, nota: d.nota, tipo: 'gasto', fecha, origen };
+  let msg = guardarMov_(r ? Object.assign(base, { importe: r.miParte, total: r.total, reparto: r.con, pago: r.pago }) : base, id);
+  if (r) {
+    apuntarDeudas_(r, id, d.nota || d.tema || 'Ticket');
+    msg += ' ' + textoDeudas_(r);
+  }
+  actualizar_('Tickets', t._fila, { reparto: '', estado: '' });
+  try {
+    if (d.nota) DriveApp.getFileById(String(t.archivo)).setName(fecha + ' ' + String(d.nota).replace(/[\\/:*?"<>|']/g, ' ').slice(0, 60) + '.jpg');
+  } catch (err) {}
+  return msg;
+}
+
+// Lo que necesita el lector del PC. De paso, deja constancia de que el PC sigue mirando.
+function pendientesPc_() {
+  PropertiesService.getScriptProperties().setProperty('PC_VISTO', new Date().toISOString());
+  const d = datos_(null);
+  return { hoy: d.hoyDia, temas: d.temas.filter(t => t.tipo === 'gasto').map(t => t.tema), pendientes: d.pendientes.filter(p => !p.estado).map(p => ({ id: p.id, dia: p.dia })) };
 }
 
 // La foto va a la papelera de Drive, de donde aún se puede recuperar durante 30 días.

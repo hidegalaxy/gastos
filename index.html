@@ -551,6 +551,7 @@
           <button type="button" class="x" data-act="quitarFoto" aria-label="Quitar la foto" hidden>✕</button>
           ${campoQuien(false)}
         </div>
+        <div class="nota" data-pista hidden>Si no escribes el importe, subo solo la foto y Claude la lee cuando tu PC esté encendido.</div>
         ${bloqueReparto()}
       </div>` : ''}
       ${proy}
@@ -571,10 +572,10 @@
   const chipAmigo = (nombre, marcado) => `<label><input type="checkbox" data-amigo value="${esc(nombre)}" ${marcado ? 'checked' : ''}><span>${esc(nombre)}</span></label>`;
 
   // total: fijo al repartir un gasto ya apuntado; si no, se lee del campo importe.
-  function bloqueReparto(total, marcados = []) {
+  function bloqueReparto(total, marcados = [], sinTotal = false) {
     const nombres = D.amigos.slice();
     marcados.forEach(n => { if (!nombres.includes(n)) nombres.unshift(n); });
-    return `<div class="pila" data-reparto ${total ? `data-total="${total}"` : ''} ${marcados.length ? '' : 'hidden'}>
+    return `<div class="pila" data-reparto ${total ? `data-total="${total}"` : ''} ${sinTotal ? 'data-sin-total="1"' : ''} ${marcados.length ? '' : 'hidden'}>
       <div class="etq">¿Con quién?</div>
       <div class="chips" data-amigos>${nombres.map(n => chipAmigo(n, marcados.includes(n))).join('')}</div>
       <div class="fila">
@@ -582,7 +583,7 @@
         <button type="button" class="boton peq sec" data-act="anadirAmigo">Añadir</button>
       </div>
       <div class="pila" data-detalle hidden>
-        <div class="seg" role="radiogroup" aria-label="Cómo se reparte">
+        <div class="seg" role="radiogroup" aria-label="Cómo se reparte" ${sinTotal ? 'hidden' : ''}>
           <label><input type="radio" name="modo" value="igual" checked><span>A partes iguales</span></label>
           <label><input type="radio" name="modo" value="mano"><span>A mano</span></label>
         </div>
@@ -631,6 +632,7 @@
     }
 
     const resumen = b.querySelector('[data-resumen]');
+    if (b.dataset.sinTotal) { resumen.textContent = 'Cuando lea el ticket, se repartirá a partes iguales.'; return; }
     if (!(total > 0)) { resumen.textContent = 'Escribe el importe para ver cuánto le toca a cada uno.'; return; }
     const partes = nombres.map(persona => {
       const i = aMano ? [...cajaPartes.querySelectorAll('[data-parte]')].find(x => x.dataset.parte === persona) : null;
@@ -740,6 +742,8 @@
     btn.classList.toggle('puesta', puesta);
     btn.querySelector('svg, img').outerHTML = puesta ? `<img src="${esc(form._foto.mini)}" alt="">` : ico('camara', 18);
     quitar.hidden = !puesta;
+    const pista = form.querySelector('[data-pista]');
+    if (pista) pista.hidden = !(puesta && D.pcVisto);
   }
 
   function prepararFormMov(form) {
@@ -754,8 +758,18 @@
     pintarTemas();
   }
 
+  async function subirPendiente(form) {
+    if (!form._foto) { avisar('Añade la foto del ticket'); return false; }
+    const rep = leerReparto(form);
+    if (rep === false) return false;
+    avisar('Subiendo ticket…');
+    return hacer('ticketPendiente', Object.assign({}, form._foto, rep || {}));
+  }
+
   async function enviarMov(form) {
     const f = Object.fromEntries(new FormData(form));
+    // Solo la foto: la lee el PC.
+    if (f.tipo !== 'ingreso' && form._foto && !f.importe && D.pcVisto) return subirPendiente(form);
     if (!f.importe) { avisar('Escribe el importe'); return false; }
     if (!f.tema) { avisar('Elige un tema'); return false; }
     if (f.fecha === hoyISO()) f.fecha = '';
@@ -805,6 +819,8 @@
         <div class="tile"><div class="et">Media diaria</div><div class="val">${eur(D.dias ? D.gastos / D.dias : 0)}</div><div class="sub">${D.dias} ${D.dias === 1 ? 'día' : 'días'}</div></div>
         <div class="tile"><div class="et">Donde más</div><div class="val">${top ? esc(top.tema) : '—'}</div><div class="sub">${top ? eur(top.total) + ' · ' + Math.round(top.total / D.gastos * 100) + ' %' : 'Sin gastos'}</div></div>
         <div class="tile"><div class="et">Días sin gastar</div><div class="val">${D.sinGastar}</div><div class="sub">Racha: ${D.racha} ${D.racha === 1 ? 'día' : 'días'}</div></div>
+
+        ${(D.porRevisar || []).length ? `<div class="tile span2"><div class="cabtile" style="margin:0"><div class="et">Claude ha leído ${D.porRevisar.length} ${D.porRevisar.length === 1 ? 'ticket' : 'tickets'}</div><button type="button" class="enlace" data-sub="tickets">Revisar</button></div></div>` : ''}
 
         <form class="tile span2 pila" id="rapido" data-form="mov" autocomplete="off">
           <div class="et">Apuntar</div>
@@ -901,12 +917,21 @@
 
     tickets() {
       const lista = D.movs.filter(m => m.ticket);
+      const pend = D.pendientes || [];
+      const rev = D.porRevisar || [];
+      const visto = D.pcVisto ? new Date(D.pcVisto).toLocaleString('es-ES', { weekday: 'long', hour: '2-digit', minute: '2-digit' }) : '';
       return `<div class="pila">
         <button type="button" class="boton" data-act="nuevoTicket">Subir ticket</button>
+        ${visto ? `<div class="nota">Tu PC miró por última vez el ${esc(visto)}. Lee lo pendiente al encenderse y cada 30 minutos.</div>` : ''}
+        ${pend.length ? `<div class="dia" style="margin:4px 0 -4px">Por leer</div><div class="galeria">${pend.map(p => `<button type="button" data-act="verPendiente" data-id="${esc(p.id)}" aria-label="Ticket por leer del ${fechaCorta(p.dia)}">
+            ${p.mini ? `<img class="foto" src="${esc(p.mini)}" alt="">` : `<span class="foto">${ico('tickets', 26)}</span>`}
+            <span class="pie"><b ${p.estado ? 'class="neg"' : ''}>${p.estado ? 'No se lee' : 'En cola'}</b><small>${p.con ? 'Con ' + esc(p.con) : 'Yo todo'}</small><small>${fechaCorta(p.dia)}</small></span>
+          </button>`).join('')}</div>` : ''}
+        ${rev.length ? `<div class="dia" style="margin:4px 0 -4px">Leídos por Claude: revísalos</div><div class="tile lista" style="padding-top:4px">${rev.map(m => filaMov(m)).join('')}</div>` : ''}
         ${lista.length ? `<div class="galeria">${lista.map(m => `<button type="button" data-act="verMov" data-id="${esc(m.id)}" aria-label="Ticket de ${esc(m.nota || m.tema)}, ${eur(m.total || m.importe)}">
             ${m.mini ? `<img class="foto" src="${esc(m.mini)}" alt="">` : `<span class="foto">${ico('tickets', 26)}</span>`}
             <span class="pie"><b>${eur(m.total || m.importe)}</b><small>${esc(m.nota || m.tema)}</small><small>${fechaCorta(m.dia)}</small></span>
-          </button>`).join('')}</div>` : `<div class="tile">${vacio('Aún no hay tickets en ' + esc(nombreMes(mes)) + '.')}</div>`}
+          </button>`).join('')}</div>` : (pend.length || rev.length ? '' : `<div class="tile">${vacio('Aún no hay tickets en ' + esc(nombreMes(mes)) + '.')}</div>`)}
         <div class="nota">¿Ya lo apuntaste con el atajo? Toca el gasto en Movimientos y añádele el ticket. Las fotos se guardan en la carpeta «Lima - Tickets» de tu Drive.</div>
       </div>`;
     },
@@ -915,8 +940,13 @@
       const teDeben = D.deudas.filter(d => !d.pagada && d.sentido === 'me_debe').reduce((s, d) => s + d.importe, 0);
       const esperando = D.deseos.filter(d => d.estado === 'esperando').length;
       const nTickets = D.movs.filter(m => m.ticket).length;
+      const nPend = (D.pendientes || []).length;
+      const nRev = (D.porRevisar || []).length;
+      const subTickets = nPend || nRev
+        ? [nPend ? nPend + ' por leer' : '', nRev ? nRev + ' por revisar' : ''].filter(Boolean).join(' · ')
+        : nTickets ? nTickets + (nTickets === 1 ? ' ticket' : ' tickets') + ' en ' + nombreMes(mes) : 'Fotos de tus compras';
       const filas = [
-        ...(D.conTickets ? [['tickets', nTickets ? nTickets + (nTickets === 1 ? ' ticket' : ' tickets') + ' en ' + nombreMes(mes) : 'Fotos de tus compras']] : []),
+        ...(D.conTickets ? [['tickets', subTickets]] : []),
         ['proyectos', D.proyectos.length ? D.proyectos.length + (D.proyectos.length === 1 ? ' proyecto' : ' proyectos') : '¿Ganan o pierden dinero?'],
         ['deudas', teDeben ? 'Te deben ' + eur(teDeben) : 'Préstamos entre amigos'],
         ['deseos', esperando ? esperando + ' esperando 48 h' : 'Piénsalo antes de comprar'],
@@ -1067,7 +1097,7 @@
 
   function filaMov(m, conBorrar) {
     const ing = m.tipo === 'ingreso';
-    const extra = [m.total ? 'Tu parte de ' + eur(m.total) : '', m.nota ? m.tema : '', m.proyecto, m.origen === 'fijo' ? 'fijo' : '', conBorrar ? m.hora : fechaCorta(m.dia)].filter(Boolean).join(' · ');
+    const extra = [m.origen === 'claude' ? 'Leído por Claude, revísalo' : '', m.total ? 'Tu parte de ' + eur(m.total) : '', m.nota ? m.tema : '', m.proyecto, m.origen === 'fijo' ? 'fijo' : '', conBorrar ? m.hora : fechaCorta(m.dia)].filter(Boolean).join(' · ');
     // Los gastos se abren para añadir el ticket o repartirlos.
     const abrir = D.conTickets && !ing;
     return `<div class="item">
@@ -1087,7 +1117,7 @@
     $('modal')._foto = null;
     alGuardar = guardar;
     $('velo').hidden = false;
-    const primero = $('modalCuerpo').querySelector('input:not([type=radio]):not([type=date]):not([type=file]):not([type=checkbox]):not([data-nuevo-amigo])');
+    const primero = $('modalCuerpo').querySelector('input:not([type=radio]):not([type=date]):not([type=file]):not([type=checkbox]):not([data-nuevo-amigo]):not([data-sin-foco])');
     if (primero) setTimeout(() => primero.focus(), 50);
   }
   function cerrarModal() { $('velo').hidden = true; alGuardar = null; }
@@ -1125,11 +1155,43 @@
       prepararFormMov($('modal'));
     },
     nuevoTicket() {
-      abrirModal('Subir ticket', formMov(false), () => enviarMov($('modal')));
-      prepararFormMov($('modal'));
+      // Sin lector en el PC, la foto se sube junto con los datos.
+      if (!D.pcVisto) {
+        abrirModal('Subir ticket', formMov(false), () => enviarMov($('modal')));
+        return prepararFormMov($('modal'));
+      }
+      abrirModal('Subir ticket', `<div class="sub" style="line-height:1.5">Haz la foto y ya está: Claude apuntará el gasto cuando tu PC esté encendido y luego lo revisas.</div>
+        <div class="fila">${campoFoto('Foto del ticket')}<button type="button" class="x" data-act="quitarFoto" aria-label="Quitar la foto" hidden>✕</button></div>
+        <div class="etq">¿Quién lo paga?</div>
+        ${campoQuien(false)}
+        ${bloqueReparto(0, [], true)}
+        <button class="boton">Subir</button>`, () => subirPendiente($('modal')));
+    },
+    verPendiente(el) {
+      const p = D.pendientes.find(x => x.id === el.dataset.id);
+      if (!p) return;
+      abrirModal(p.estado ? 'No he podido leerlo' : 'Por leer', `<div class="cabtile" style="margin:0">
+          <div class="sub" style="line-height:1.5">${p.estado ? 'Escribe tú los datos.' : 'Lo leeré cuando tu PC esté encendido. Si tienes prisa, apúntalo tú.'}${p.con ? ' Se repartirá con ' + esc(p.con) + '.' : ''}</div>
+          ${borrar('quitarTicket', `data-id="${esc(p.id)}"`)}
+        </div>
+        <div class="fotoGrande" data-foto-grande><div class="vacio">Cargando la foto…</div></div>
+        <div class="importe"><label><input name="importe" inputmode="decimal" placeholder="0,00" aria-label="Importe total" data-sin-foco><span>€</span></label></div>
+        ${opcionesTema('')}
+        <div class="fila"><input class="campo" name="nota" placeholder="Tienda (opcional)" data-sin-foco><input class="campo" name="fecha" type="date" value="${esc(p.dia)}" aria-label="Fecha"></div>
+        <button class="boton">Apuntar</button>`, f => hacer('completarTicket', Object.assign({ id: p.id }, f)));
+      cargarFotoGrande({ id: p.id, tema: 'este gasto' });
+    },
+    corregirMov(el) {
+      const m = D.movs.concat(D.porRevisar || []).find(x => x.id === el.dataset.id);
+      if (!m) return;
+      abrirModal('Corregir', `<div class="importe"><label><input name="importe" inputmode="decimal" value="${(m.total || m.importe).toFixed(2).replace('.', ',')}" aria-label="${m.total ? 'Total del ticket' : 'Importe'}"><span>€</span></label></div>
+        ${m.total ? '<div class="sub">Es el total del ticket. Si lo cambias, se reparte de nuevo a partes iguales.</div>' : ''}
+        ${opcionesTema(m.tema)}
+        <div class="fila"><input class="campo" name="nota" value="${esc(m.nota)}" placeholder="Nota (opcional)"><input class="campo" name="fecha" type="date" value="${esc(m.dia)}" aria-label="Fecha"></div>
+        <button class="boton">Guardar</button>`, f => hacer('editarMov', Object.assign({ id: m.id }, f)));
     },
     verMov(el) {
-      const m = D.movs.find(x => x.id === el.dataset.id);
+      const m = D.movs.concat(D.porRevisar || []).find(x => x.id === el.dataset.id);
       if (!m) return;
       const compartido = m.total > 0;
       const marcados = compartido ? m.reparto.split(', ').filter(Boolean) : [];
@@ -1137,6 +1199,10 @@
           <div class="val" style="font-size:30px;font-weight:700">${eur(m.importe)}</div>
           <div class="sub">${esc(m.tema)} · ${fechaCorta(m.dia)}${compartido ? ` · tu parte de ${eur(m.total)}` : ''}</div>
         </div>
+        ${D.pendientes ? `<div class="fila">
+          ${m.origen === 'claude' ? `<button type="button" class="boton peq" style="flex:1" data-act="revisadoMov" data-id="${esc(m.id)}">Está bien</button>` : ''}
+          <button type="button" class="boton peq sec" style="flex:1" data-act="corregirMov" data-id="${esc(m.id)}">Corregir</button>
+        </div>` : ''}
         ${m.ticket
           ? `<div class="fotoGrande" data-foto-grande><div class="vacio">Cargando la foto…</div></div>
              <div class="fila">
