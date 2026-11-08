@@ -551,6 +551,7 @@
           <button type="button" class="x" data-act="quitarFoto" aria-label="Quitar la foto" hidden>✕</button>
           ${campoQuien(false)}
         </div>
+        <div class="resumenRep" data-lectura role="status" hidden></div>
         ${bloqueReparto()}
       </div>` : ''}
       ${proy}
@@ -731,6 +732,51 @@
     form._foto = foto;
     form.dataset.sucio = '1';
     pintarFotoForm(form);
+    if (D.conLector) leerFotoForm(form, foto);
+  }
+
+  // Claude lee la foto y rellena el formulario. Nunca guarda: lo que hayas escrito tú no se toca.
+  async function leerFotoForm(form, foto) {
+    const linea = form.querySelector('[data-lectura]');
+    linea.hidden = false;
+    linea.textContent = 'Claude está leyendo el ticket…';
+    form._leyendo = true;
+    let r;
+    try {
+      r = await run('leerTicket', foto.foto);
+    } catch (e) {
+      if (form._foto === foto) {
+        form._leyendo = false;
+        linea.textContent = 'No he podido leerlo: ' + e.message + ' La foto se guardará igual; escribe tú los datos.';
+      }
+      return;
+    }
+    // Mientras leía puede haber cambiado la foto, o haberse guardado o cerrado el formulario.
+    if (form._foto !== foto || !form.isConnected) return;
+    form._leyendo = false;
+    const importe = form.querySelector('[name=importe]');
+    const nota = form.querySelector('[name=nota]');
+    const fecha = form.querySelector('[name=fecha]');
+    const poner = (campo, valor, libre) => {
+      if (!valor || !libre) return;
+      campo.value = valor;
+      campo.dataset.auto = '1';
+    };
+    poner(importe, r.importe ? r.importe.toFixed(2).replace('.', ',') : '', !importe.value || importe.dataset.auto);
+    poner(nota, r.comercio, !nota.value || nota.dataset.auto);
+    poner(fecha, r.fecha, fecha.value === hoyISO() || fecha.dataset.auto);
+    const elegido = form.querySelector('[name=tema]:checked');
+    if (r.tema && (!elegido || form._temaAuto)) {
+      const radio = [...form.querySelectorAll('[name=tema]')].find(i => i.value === r.tema);
+      if (radio) {
+        radio.checked = true;
+        form._temaAuto = true;
+      }
+    }
+    actualizarReparto(form);
+    const leido = [r.comercio, r.importe ? eur(r.importe) : '', r.fecha ? fechaCorta(r.fecha) : ''].filter(Boolean).join(' · ');
+    linea.textContent = (leido ? 'He leído: ' + leido + '.' : 'No he podido sacar los datos.')
+      + (r.importe ? ' Revísalo antes de apuntarlo.' : ' No veo bien el total: escríbelo tú.');
   }
 
   function pintarFotoForm(form) {
@@ -756,6 +802,7 @@
 
   async function enviarMov(form) {
     const f = Object.fromEntries(new FormData(form));
+    if (form._leyendo && (!f.importe || !f.tema)) { avisar('Espera un momento: estoy leyendo el ticket'); return false; }
     if (!f.importe) { avisar('Escribe el importe'); return false; }
     if (!f.tema) { avisar('Elige un tema'); return false; }
     if (f.fecha === hoyISO()) f.fecha = '';
@@ -907,6 +954,7 @@
             ${m.mini ? `<img class="foto" src="${esc(m.mini)}" alt="">` : `<span class="foto">${ico('tickets', 26)}</span>`}
             <span class="pie"><b>${eur(m.total || m.importe)}</b><small>${esc(m.nota || m.tema)}</small><small>${fechaCorta(m.dia)}</small></span>
           </button>`).join('')}</div>` : `<div class="tile">${vacio('Aún no hay tickets en ' + esc(nombreMes(mes)) + '.')}</div>`}
+        ${D.conLector ? '' : `<button type="button" class="enlace" style="text-align:left" data-sub="conexiones">Activa el lector: Claude rellena los datos con la foto</button>`}
         <div class="nota">¿Ya lo apuntaste con el atajo? Toca el gasto en Movimientos y añádele el ticket. Las fotos se guardan en la carpeta «Lima - Tickets» de tu Drive.</div>
       </div>`;
     },
@@ -1047,6 +1095,13 @@
       const base = D.urlApp + '?k=' + encodeURIComponent(K);
       const copiable = txt => `<input class="campo" readonly value="${esc(txt)}" data-copiar style="font-size:12px;margin-top:8px" aria-label="Dirección para copiar">`;
       return `<div class="pila">
+        ${!D.conTickets ? '' : D.conLector
+          ? `<div class="tile"><div class="cabtile" style="margin:0"><b>Lector de tickets</b>${borrar('claveClaude', 'data-clave=""')}</div>
+              <div class="sub" style="margin-top:6px;line-height:1.5">Activado. Al poner una foto en el formulario, Claude rellena el importe, la tienda, la fecha y el tema. Cada foto se envía a Anthropic y gasta saldo de tu cuenta.</div></div>`
+          : `<form class="tile pila" data-form="claveClaude" autocomplete="off"><b>Lector de tickets</b>
+              <div class="sub" style="line-height:1.5">Claude lee la foto y rellena el formulario. Crea una clave en console.anthropic.com, añade saldo y pégala aquí. Cada foto se envía a Anthropic. La clave se guarda en tu servidor de Google.</div>
+              <input class="campo" type="password" name="clave" placeholder="sk-ant-…" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Clave de Anthropic">
+              <button class="boton peq">Activar</button></form>`}
         <div class="tile"><b>Dirección para tus atajos</b>
           <div class="sub" style="margin-top:6px;line-height:1.5">Pégala en la primera acción de los atajos Gasto e Ingreso. No la compartas: lleva tu clave.</div>
           ${copiable(base)}
@@ -1214,6 +1269,8 @@
     if (act === 'quitarFoto') {
       const form = t.closest('form');
       form._foto = null;
+      form._leyendo = false;
+      form.querySelector('[data-lectura]').hidden = true;
       return pintarFotoForm(form);
     }
     if (act === 'copiarAtajos') {
@@ -1264,6 +1321,8 @@
     const form = e.target.closest('form');
     if (!form) return;
     if (form.id === 'rapido') form.dataset.sucio = '1';
+    if (e.target.name === 'tema') form._temaAuto = false;
+    if (e.target.name === 'fecha') delete e.target.dataset.auto;
     if (e.target.matches('[data-foto], [data-mov]')) return elegirFoto(e.target);
     if (e.target.name === 'quien') {
       const b = form.querySelector('[data-reparto]');
@@ -1279,6 +1338,7 @@
     const form = e.target.closest('form');
     if (!form) return;
     if (form.id === 'rapido') form.dataset.sucio = '1';
+    delete e.target.dataset.auto;
     if (e.target.matches('[name=importe], [data-parte]')) actualizarReparto(form);
   });
 
