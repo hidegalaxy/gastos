@@ -1191,8 +1191,8 @@
         <div class="tile"><b>Widget con lo gastado</b>
           <div class="sub" style="margin-top:6px;line-height:1.5">Instala la app gratis <b>Scriptable</b>. Abre este enlace en el iPhone, copia todo el texto, pégalo en un script nuevo de Scriptable y llámalo Lima. Luego añade un widget de Scriptable a la pantalla de inicio y elige ese script.</div>
           <a class="boton peq sec" style="display:inline-flex;align-items:center;margin-top:10px;text-decoration:none" href="${esc(base + '&accion=scriptable')}" target="_blank">Abrir el código del widget</a></div>
-        ${D.conTickets ? `<div class="tile"><b>Atajo "Tiquet"</b>
-          <div class="sub" style="margin-top:6px;line-height:1.5">Di «Oye Siri, tiquet», haz la foto y Claude apunta el gasto cuando tu PC esté encendido. En Dreceres, crea una drecera nueva llamada Tiquet con estas acciones, buscándolas por la palabra entre paréntesis:<br>
+        ${D.conTickets ? `<div class="tile"><b>Atajo "Subir ticket"</b>
+          <div class="sub" style="margin-top:6px;line-height:1.5">Di «Oye Siri, ejecutar subir ticket», haz la foto y Claude apunta el gasto cuando tu PC esté encendido. En Dreceres, crea una drecera nueva llamada Subir ticket con estas acciones, buscándolas por la palabra entre paréntesis:<br>
           1. Hacer una foto (<b>foto</b>), con la vista previa de la cámara activada.<br>
           2. Redimensionar la imagen (<b>redimensiona</b>): anchura <b>1500</b>.<br>
           3. Convertir la imagen (<b>converteix</b>) a <b>JPEG</b>.<br>
