@@ -830,7 +830,12 @@
     const f = Object.fromEntries(new FormData(form));
     // Solo la foto: la lee el PC.
     if (f.tipo !== 'ingreso' && form._foto && !f.importe && D.pcVisto) return subirPendiente(form);
-    if (!f.importe) { avisar('Escribe el importe'); return false; }
+    if (!f.importe) {
+      // Servidor actualizado, pero ningún PC ha mirado aún: decirlo, en vez de parecer un fallo.
+      const falta = form._foto && D.pendientes && !D.pcVisto;
+      avisar(falta ? 'Escribe el importe. Para que Claude lea la foto, conecta antes tu PC' : 'Escribe el importe');
+      return false;
+    }
     if (!f.tema) { avisar('Elige un tema'); return false; }
     if (f.fecha === hoyISO()) f.fecha = '';
     if (f.tipo !== 'ingreso') {
