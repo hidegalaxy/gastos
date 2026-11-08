@@ -148,6 +148,7 @@ function doGet(e) {
 }
 
 // POST { k, importe, tema, nota, tipo?, proyecto? } → mensaje para la notificación del atajo
+// POST { k, foto } → atajo Tiquet: foto en base64, queda por leer
 function doPost(e) {
   let crudo;
   try {
@@ -172,6 +173,7 @@ function doPost(e) {
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
+    if (d.foto) return texto_(fotoDelAtajo_(d.foto));
     return texto_(guardarMov_(d));
   } catch (err) {
     return texto_('❌ ' + err.message);
@@ -300,12 +302,15 @@ const ACCIONES_ = {
       throw new Error('Alguien ya ha pagado su parte: no se puede cambiar el reparto');
     }
     const total = Number(fila.total) || Number(fila.importe) || 0;
-    const r = calcularReparto_(total, d.amigos, d.pago);
+    const asignacion = Array.isArray(d.asignacion) ? d.asignacion : null;
+    const r = calcularReparto_(total, d.amigos, d.pago, !!asignacion);
     borrarDonde_('Deudas', x => String(x.mov) === d.id);
-    actualizar_('Gastos', fila._fila, { importe: r ? r.miParte : total, total: r ? r.total : '', reparto: r ? r.con : '', pago: r ? r.pago : '' });
-    guardarAsignacion_(d.id, r && Array.isArray(d.asignacion) ? d.asignacion : null);
+    // Repartirlo cuenta como haberlo revisado.
+    const origen = String(fila.origen) === 'claude' ? '' : String(fila.origen || '');
+    actualizar_('Gastos', fila._fila, { importe: r ? r.miParte : total, total: r ? r.total : '', reparto: r ? r.con : '', pago: r ? r.pago : '', origen });
+    guardarAsignacion_(d.id, r ? asignacion : null);
     if (!r) return 'Ahora lo pagas tú todo';
-    apuntarDeudas_(r, d.id, String(fila.nota || fila.tema));
+    apuntarDeudas_(r, d.id, conceptoDeudas_(d.id, String(fila.nota || fila.tema), asignacion));
     return 'Tu parte: ' + eur_(r.miParte) + '. ' + textoDeudas_(r);
   },
   ticketMov: d => {
@@ -369,6 +374,7 @@ const ACCIONES_ = {
     const fecha = String(d.fecha || '');
     const fechaBuena = /^\d{4}-\d{2}-\d{2}$/.test(fecha) && !isNaN(new Date(fecha + 'T12:00:00Z')) && fecha <= hoy && fecha >= mesMas_(hoy.slice(0, 7), -24);
     const tema = temas_().some(x => x.tipo === 'gasto' && x.tema === d.tema) ? d.tema : '';
+    if (miniBuena_(d.mini)) actualizar_('Tickets', t._fila, { mini: d.mini });
     return apuntarTicket_(t, { importe, tema, nota: String(d.comercio || '').trim().slice(0, 60), fecha: fechaBuena ? fecha : '', articulos: limpiarArticulos_(d.articulos) }, 'claude');
   },
   // Para repartir por artículos un ticket que se apuntó sin leerlos.
@@ -950,7 +956,8 @@ function aplicarFijos_() {
 
 // amigos: [{ persona, importe? }]. Sin importe, a partes iguales; los céntimos que sobran van a tu parte.
 // pago: nombre del amigo que ha pagado el ticket; vacío si has pagado tú. Sin amigos devuelve null.
-function calcularReparto_(total, amigos, pago) {
+// cero: admite que tu parte sea 0, cuando todo lo del ticket es de otros.
+function calcularReparto_(total, amigos, pago, cero) {
   const lista = (Array.isArray(amigos) ? amigos : [])
     .map(a => ({ persona: limpiar_(a && a.persona), importe: a && a.importe != null && a.importe !== '' ? redondear_(numero_(a.importe)) : null }))
     .filter(a => a.persona);
@@ -963,7 +970,7 @@ function calcularReparto_(total, amigos, pago) {
     if (!(a.importe > 0)) throw new Error('Revisa lo que paga ' + a.persona);
   });
   const miParte = redondear_(total - lista.reduce((s, a) => s + a.importe, 0));
-  if (!(miParte > 0)) throw new Error('Tu parte tiene que ser más de 0 €. Si lo pagan todo ellos, apúntalo como deuda.');
+  if (!(miParte > 0) && !(cero && miParte === 0)) throw new Error('Tu parte tiene que ser más de 0 €. Si lo pagan todo ellos, apúntalo como deuda.');
   const pagador = lista.find(a => a.persona === limpiar_(pago));
   return {
     total, miParte, con: lista.map(a => a.persona).join(', '), pago: pagador ? pagador.persona : '',
@@ -977,7 +984,7 @@ function calcularReparto_(total, amigos, pago) {
 function apuntarDeudas_(r, mov, concepto) {
   r.deudas.forEach(x => anadir_('Deudas', {
     id: nuevoId_('d'), fecha: new Date(), persona: x.persona, importe: x.importe,
-    sentido: x.sentido, concepto, pagada: '', mov,
+    sentido: x.sentido, concepto: typeof concepto === 'function' ? concepto(x.persona) : concepto, pagada: '', mov,
   }));
 }
 
@@ -1013,8 +1020,35 @@ function guardarTicket_(mov, foto, mini, nombre, extra) {
   const blob = Utilities.newBlob(Utilities.base64Decode(m[2]), 'image/' + m[1], diaDe_(new Date()) + ' ' + seguro + '.' + ext);
   const archivo = carpetaTickets_().createFile(blob);
   quitarTicket_(mov);
-  const miniBuena = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(String(mini || '')) && String(mini).length < 45000;
-  anadir_('Tickets', Object.assign({ mov, archivo: archivo.getId(), url: archivo.getUrl(), mini: miniBuena ? mini : '', fecha: new Date() }, extra || {}));
+  anadir_('Tickets', Object.assign({ mov, archivo: archivo.getId(), url: archivo.getUrl(), mini: miniBuena_(mini) ? mini : '', fecha: new Date() }, extra || {}));
+}
+
+function miniBuena_(mini) {
+  return /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(String(mini || '')) && String(mini).length < 45000;
+}
+
+// El atajo manda la foto en base64, a veces con saltos de línea. Sin miniatura: la añade el PC al leerla.
+function fotoDelAtajo_(foto) {
+  const b64 = String(foto).replace(/^data:image\/\w+;base64,/, '').replace(/\s+/g, '');
+  const tipo = b64.startsWith('/9j/') ? 'jpeg' : b64.startsWith('iVBOR') ? 'png' : '';
+  if (!tipo) return '❌ Esa foto no es JPEG: revisa la acción que la convierte en el atajo';
+  try {
+    guardarTicket_(nuevoId_('g'), 'data:image/' + tipo + ';base64,' + b64, '', 'Pendiente', { reparto: '', estado: '' });
+  } catch (err) {
+    return '❌ ' + err.message;
+  }
+  return '🧾 Ticket subido. Claude lo leerá cuando tu PC esté encendido.';
+}
+
+// Cada deuda dice qué artículos son de esa persona. concepto puede ser un texto o una función de la persona.
+function conceptoDeudas_(mov, general, asignacion) {
+  if (!asignacion) return general;
+  const t = leer_('Tickets').find(x => String(x.mov) === String(mov));
+  const articulos = t ? listaGuardada_(t.articulos) : [];
+  return persona => {
+    const suyos = articulos.filter((a, i) => (asignacion[i] || []).indexOf(persona) >= 0).map(a => a.nombre);
+    return suyos.length ? (general + ': ' + suyos.join(', ')).slice(0, 120) : general;
+  };
 }
 
 function listaGuardada_(texto) {
